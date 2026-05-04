@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# loop-agent runtime state (created in target project)
+.loop-agent/
+
+# Accidental literal brace-expansion directories (Windows shell quirk)
+{agents,state,logs,archive,tasks}/
+{prompts,state,logs}/
+
+# Logs / state / archive
+logs/
+state/
+archive/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Env
+.env
+.env.local

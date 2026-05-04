@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(bash -n ./loop.sh)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('./backlog_manager.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('./backlog_manager.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('./progress_window.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\)\\) for f in ['./backlog_manager.py', './progress_window.py']]\")",
+      "Bash(awk ' *)",
+      "Bash(sort -t: -k1,1n)",
+      "Bash(cd /tmp)",
+      "Bash(cat)",
+      "Bash(python test_atomic.py)",
+      "Bash(rm test_atomic.py)"
+    ]
+  }
+}

@@ -1,0 +1,234 @@
+#!/bin/sh
+
+drain_stdin() {
+  if [ ! -t 0 ]; then
+    cat >/dev/null
+  fi
+}
+
+read_prompt() {
+  if [ ! -t 0 ]; then
+    cat
+  fi
+}
+
+has_prompt_text() {
+  printf '%s' "$1" | grep -qi "$2"
+}
+
+edit_fixture_source() {
+  target_dir="${LOOP_FAKE_PROJECT_DIR:-$(pwd)}"
+  [ -f "$target_dir/src/app.txt" ] || return 1
+  printf '%s\n' "happy path complete" >"$target_dir/src/app.txt"
+}
+
+run_pass_scenario() {
+  prompt="$1"
+
+  if has_prompt_text "$prompt" "# planner"; then
+    cat <<'EOF'
+# Plan - Loop 1
+
+## Tasks
+
+### Task 1: Complete fixture app update
+- File: `src/app.txt`
+- What to do: Write deterministic happy-path content to the fixture app file.
+- Completion criteria:
+  - [ ] `src/app.txt` contains `happy path complete`.
+  - [ ] verify: `test "$(cat src/app.txt)" = "happy path complete"`
+
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "# plan critic"; then
+    cat <<'EOF'
+# Plan Review - Loop 1
+
+## Notes
+PASS: none
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "# impl critic"; then
+    cat <<'EOF'
+# Implementation Critique - Loop 1
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "# implementer"; then
+    edit_fixture_source || exit 1
+    cat <<'EOF'
+# Implementation Summary - Loop 1
+
+## Tasks completed
+- [x] Task 1: Complete fixture app update - wrote the requested fixture source output.
+
+## Files changed
+| File | Action | What changed |
+|------|--------|--------------|
+| src/app.txt | modified | Wrote deterministic happy-path content. |
+
+## Completion criteria status
+Task 1:
+- [x] src/app.txt contains happy path complete.
+
+## Additional files needed
+none
+
+## Unrelated issues noticed (not fixed)
+none
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "implementation critic"; then
+    cat <<'EOF'
+# Implementation Critique - Loop 1
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "impl critic"; then
+    cat <<'EOF'
+# Implementation Critique - Loop 1
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "plan review"; then
+    cat <<'EOF'
+# Plan Review - Loop 1
+
+## Notes
+PASS: none
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "plan critic"; then
+    cat <<'EOF'
+# Plan Review - Loop 1
+
+## Notes
+PASS: none
+
+VERDICT: PASS
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "implementer"; then
+    edit_fixture_source || exit 1
+    cat <<'EOF'
+# Implementation Summary - Loop 1
+
+## Tasks completed
+- [x] Task 1: Complete fixture app update - wrote the requested fixture source output.
+
+## Files changed
+| File | Action | What changed |
+|------|--------|--------------|
+| src/app.txt | modified | Wrote deterministic happy-path content. |
+
+## Completion criteria status
+Task 1:
+- [x] src/app.txt contains happy path complete.
+
+## Additional files needed
+none
+
+## Unrelated issues noticed (not fixed)
+none
+EOF
+    return 0
+  fi
+
+  if has_prompt_text "$prompt" "planner"; then
+    cat <<'EOF'
+# Plan - Loop 1
+
+## Tasks
+
+### Task 1: Complete fixture app update
+- File: `src/app.txt`
+- What to do: Write deterministic happy-path content to the fixture app file.
+- Completion criteria:
+  - [ ] `src/app.txt` contains `happy path complete`.
+  - [ ] verify: `test "$(cat src/app.txt)" = "happy path complete"`
+
+EOF
+    return 0
+  fi
+
+  cat <<'EOF'
+# Implementation Summary - Loop 1
+
+## Result
+PASS
+EOF
+}
+
+run_scenario() {
+  prompt="$1"
+
+  case "${LOOP_FAKE_SCENARIO:-pass}" in
+    pass)
+      run_pass_scenario "$prompt"
+      ;;
+    fail)
+      cat <<'EOF'
+# Implementation Summary - Loop 1
+
+## Result
+FAIL
+EOF
+      ;;
+    malformed)
+      echo "malformed fake codex output"
+      ;;
+    rate_limit)
+      echo "rate limit exceeded: fake codex quota reached" >&2
+      exit 42
+      ;;
+    *)
+      echo "unknown LOOP_FAKE_SCENARIO: ${LOOP_FAKE_SCENARIO}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+case "${1:-}" in
+  --version|-v)
+    echo "fake-codex 1.0.0"
+    exit 0
+    ;;
+  --self-test)
+    LOOP_FAKE_SCENARIO=pass "$0" </dev/null >/dev/null || exit 1
+    LOOP_FAKE_SCENARIO=fail "$0" </dev/null >/dev/null || exit 1
+    LOOP_FAKE_SCENARIO=malformed "$0" </dev/null >/dev/null || exit 1
+    if LOOP_FAKE_SCENARIO=rate_limit "$0" </dev/null >/dev/null 2>/dev/null; then
+      exit 1
+    fi
+    "$0" --version >/dev/null || exit 1
+    "$0" -v >/dev/null || exit 1
+    echo "fake codex self-test ok"
+    exit 0
+    ;;
+esac
+
+prompt="$* $(read_prompt)"
+run_scenario "$prompt"

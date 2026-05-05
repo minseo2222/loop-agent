@@ -53,6 +53,10 @@ mkdir -p .loop-agent
 
 ## Backlog quality rules
 
+- Each task must have a valid task ID in the format `Task Phase.Number`.
+- Each task must include `Size`, `Files`, `Description`, `Completion criteria`, `Depends`, `Fail count`, and a `verify:` command.
+- `Size` must be `Small` or `Medium`.
+- `Files:` must be non-empty and use paths relative to the project root.
 - Prefer exact file paths over broad directories in every task's `Files:` field.
 - If a task would touch more than 3–5 core files, split it before writing the backlog.
 - Keep source/code work, documentation updates, and final validation as separate tasks when they involve different file groups.
@@ -78,21 +82,21 @@ mkdir -p .loop-agent
 
 - [ ] Task 1.1: (task name)
   - Size: Small/Medium
-  - Files: (exact file path relative to project root)
+  - Files: (non-empty exact file path relative to project root)
   - Description: (what needs to be done)
   - Completion criteria:
     - [ ] (verifiable condition)
-    - [ ] verify: `(shell command)`
+    - [ ] Verify with `verify: (shell command)`
   - Depends: None
   - Fail count: 0
 
 - [ ] Task 1.2: (task name)
   - Size: Small/Medium
-  - Files: (exact file path)
+  - Files: (non-empty exact file path relative to project root)
   - Description: (what needs to be done)
   - Completion criteria:
     - [ ] (verifiable condition)
-    - [ ] verify: `(shell command)`
+    - [ ] Verify with `verify: (shell command)`
   - Depends: Task 1.1
   - Fail count: 0
 
@@ -118,11 +122,20 @@ Check each item before writing the file:
 2. **Are there any Large tasks?**
    If yes, split them and rewrite before saving.
 
-3. **Does every task have a `verify:` command?**
+3. **Does every task use a valid task ID and `Small` or `Medium` size?**
+   If not, fix the ID or split the task.
+
+4. **Does every task have non-empty relative `Files`, `Description`, `Completion criteria`, `Depends`, and `Fail count` fields?**
+   If not, add the missing field before saving.
+
+5. **Does every task have a Verify check with a `verify:` command?**
    If not, add one.
 
-4. **Are dependency IDs correct and free of cycles?**
+6. **Are dependency IDs correct and free of cycles?**
    If not, fix them.
+
+7. **Does the backlog pass lint?**
+   Run `python backlog_manager.py lint .loop-agent/backlog.md` and fix any reported errors before using the backlog.
 
 ---
 

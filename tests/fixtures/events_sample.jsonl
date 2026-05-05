@@ -1,0 +1,6 @@
+{"event":"decision","task_id":"Task 1","task_name":"Pass sample","status":"PASS"}
+{"event":"decision","task_id":"Task 2","task_name":"Fail sample","status":"FAIL"}
+{"event":"decision","task_id":"Task 3","task_name":"Blocked sample","status":"BLOCKED"}
+{"event":"proposal_verdict","proposal":"proposal-a.md","verdict":"PASS"}
+{"event":"proposal_verdict","proposal":"proposal-b.md","verdict":"FAIL"}
+{"event":"proposal_verdict","proposal":"proposal-c.md","verdict":"PASS"}

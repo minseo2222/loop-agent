@@ -10,6 +10,9 @@ $LOOP_PLAN
 **2. Plan review notes:**
 $LOOP_PLAN_CRITIQUE
 
+**3. Bounded Markdown progress context (`progress_window.md`):**
+$LOOP_PROGRESS_WINDOW
+
 **3. Files to read and modify (ONLY these — no other project files):**
 Read the files listed under each task's "File:" field in plan.md.
 Do NOT browse or read any other files in the project folder.

@@ -11,7 +11,7 @@ $LOOP_BACKLOG
 **2. Current Task assigned to this loop:**
 $LOOP_CURRENT_TASK
 
-**3. Progress log (recent 5 loops):**
+**3. Bounded Markdown progress context (`progress_window.md`, recent loops):**
 $LOOP_PROGRESS_WINDOW
 
 **4. Relevant code files:**
@@ -27,16 +27,18 @@ Read $LOOP_CURRENT_TASK to find:
 - Target file(s)
 - Completion criteria and verify commands
 - Dependencies (confirm they are done in backlog.md)
+- Retry context (bounded): Fail count, Last failure summary, and Evidence path
 
 ## Step 2: Read the target files
 
-Read ONLY the files listed in the Task's "Files:" field.
+Read ONLY the files listed in the Task's "Files:" field. Plan only within the backlog `Files:` list.
 Understand their current state before planning changes.
 
-## Step 3: Check progress history
+## Step 3: Check bounded retry context
 
-Read $LOOP_PROGRESS_WINDOW.
-If this Task previously failed, understand why and plan differently.
+Use only the bounded retry context from $LOOP_CURRENT_TASK plus the Markdown window at $LOOP_PROGRESS_WINDOW.
+Do not pull full diffs, full logs, or unbounded evidence into the plan.
+If this Task previously failed, use the fail count, last failure summary, and evidence path to plan differently while staying within the backlog `Files:` scope.
 
 ## Step 4: Write the plan
 

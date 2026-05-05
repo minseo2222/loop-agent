@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: bash -n loop.sh run.sh
+
+      - name: Compile Python files
+        run: python -m py_compile backlog_manager.py progress_window.py
+
+      - name: Run happy-path fake CLI smoke test
+        run: bash tests/e2e_pass_fake_cli.sh
+
+      - name: Run rate-limit fake CLI smoke test
+        run: bash tests/e2e_rate_limit_fake_cli.sh

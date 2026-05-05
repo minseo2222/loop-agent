@@ -5,6 +5,10 @@
 #  Usage:
 #    ./run.sh [options] <doc-path>
 #
+#  Deprecated:
+#    Use ./loop.sh init and ./loop.sh run for new work.
+#    run.sh is retained only for legacy document-driven workflows.
+#
 #  Options:
 #    -n, --loops <N>       iterations (default: 3)
 #    -t, --tool  <tool>    AI tool: claude | codex (default: codex)
@@ -44,6 +48,9 @@ AI_TOOL="codex"
 DOC_PATH=""
 
 usage() {
+  echo "Deprecated: run.sh is a legacy compatibility entrypoint."
+  echo "Use ./loop.sh init and ./loop.sh run for new work."
+  echo ""
   echo "Usage: ./run.sh [options] <doc-path>"
   echo ""
   echo "Options:"
@@ -66,6 +73,9 @@ while [[ $# -gt 0 ]]; do
     *)  DOC_PATH="$1"; shift ;;
   esac
 done
+
+warn "Deprecated: run.sh is retained only for legacy document-driven workflows."
+warn "Use ./loop.sh init and ./loop.sh run for new work."
 
 # ── Validation ────────────────────────────────────────────────
 if [[ -z "$DOC_PATH" ]]; then

@@ -15,6 +15,8 @@ This is independent verification — do not rely on the Planner's summaries.
 **3. Previous failures (recent 5 loops — sliding window):**
 $LOOP_PROGRESS_WINDOW
 
+Use this `progress_window.md` Markdown file only as bounded context. It is not a source of truth for backlog, current task, or plan content.
+
 ---
 
 ## Why you read planning documents directly
@@ -34,7 +36,7 @@ Vague tasks → FAIL.
 Exception: "No additional work" → PASS.
 
 **Criterion 3: Does it repeat a previous failure without addressing it?**
-Compare against FAIL entries in progress.txt.
+Compare against FAIL entries summarized in the bounded progress window.
 Same attempt without a stated different approach → FAIL.
 Exception: "No additional work" → skip.
 

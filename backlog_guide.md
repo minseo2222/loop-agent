@@ -1,8 +1,8 @@
 # backlog_guide.md — Backlog Generation Instructions
 
-> This file is read by Claude Code when opening a **target project** alongside loop-agent.
+> This file is read by Claude Code when opening a **target project** alongside LoopDex.
 > It instructs Claude to analyze planning documents and generate `.loop-agent/backlog.md`,
-> which loop-agent uses to drive its autonomous plan → implement → review loop.
+> which LoopDex uses to drive its autonomous plan → implement → review loop.
 
 ---
 

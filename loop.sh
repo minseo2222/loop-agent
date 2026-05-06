@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# loop-agent · loop.sh
+# LoopDex · loop.sh
 #
 # Usage: ./loop.sh N /path/to/myproject
 # Example: ./loop.sh 3 /path/to/myproject
@@ -18,7 +18,7 @@ for arg in "$@"; do
 done
 
 # ── Codex model/effort defaults ───────────────────────────────
-# Explicitly sets the model used by loop-agent rather than relying solely on config.toml defaults.
+# Explicitly sets the model used by LoopDex rather than relying solely on config.toml defaults.
 # Can be overridden at runtime via environment variable:
 #   CODEX_MODEL=gpt-5.4 ./loop.sh 3 /path/to/project
 CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
@@ -1109,7 +1109,7 @@ get_task_fail_count() {
   awk -v tid="$task_id" '
     BEGIN { found=0 }
 
-    # Current loop-agent backlog format
+    # Current LoopDex backlog format
     $0 ~ "^- \\[.\\] " tid ":" { found=1; next }
 
     # Legacy markdown heading format
@@ -1892,7 +1892,7 @@ git_ensure_init() {
     # .gitattributes: keep LF
     printf '* text=auto eol=lf\n' > "$PROJECT_DIR/.gitattributes" 
 
-    # .gitignore: exclude embedded git folders and loop-agent state files
+    # .gitignore: exclude embedded git folders and LoopDex state files
     # Do not overwrite an existing .gitignore
     if [[ ! -f "$PROJECT_DIR/.gitignore" ]]; then
       printf '# loop-agent state files (no git tracking needed)\n.loop-agent/\n' > "$PROJECT_DIR/.gitignore"
@@ -2372,7 +2372,7 @@ git_commit_pass() {
       subrepo="$(dirname "$git_marker")"
     fi
 
-    # Exclude the main repo and loop-agent tool repo from nested implementation repo processing.
+    # Exclude the main repo and LoopDex tool repo from nested implementation repo processing.
     if [[ "$subrepo" == "$PROJECT_DIR" ]]; then
       continue
     fi

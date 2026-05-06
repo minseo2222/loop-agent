@@ -1,11 +1,11 @@
 # Task Planning Failure Patterns
 
-This document records common causes of repeated failures when building and running tasks with loop-agent.
+This document records common causes of repeated failures when building and running tasks with LoopDex.
 The goal is to reduce Plan Critic and Impl Critic failures on future tasks, and to prevent completed-looking states that are not actually complete.
 
 ## Scope
 
-This document is not project-specific implementation guidance. It is an operational reference that loop-agent applies when creating and validating backlogs for any new project.
+This document is not project-specific implementation guidance. It is an operational reference that LoopDex applies when creating and validating backlogs for any new project.
 
 Applies to:
 
@@ -251,7 +251,7 @@ Prevention:
 
 Verification sequence:
 ```bash
-git status --short -- . ':(exclude).loop-agent/**' ':(exclude)loop-agent/**'
+git status --short -- . ':(exclude).loop-agent/**' ':(exclude)LoopDex/**'
 grep -E '^\- \[ \] Task|^\- \[!\] Task' .loop-agent/backlog.md
 tail -120 .loop-agent/progress.txt
 ```
@@ -419,7 +419,7 @@ When a documentation or audit task is stuck, split in this order:
 
 ## Document Evolution Rules
 
-This is a living document, not a fixed ruleset. It accumulates failure patterns discovered during loop-agent operation.
+This is a living document, not a fixed ruleset. It accumulates failure patterns discovered during LoopDex operation.
 
 Add a new pattern when:
 - The same Plan Critic failure reason appears 2+ times

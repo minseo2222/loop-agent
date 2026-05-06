@@ -7,7 +7,7 @@ __pycache__/
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
 
-# loop-agent runtime state (created in target project)
+# LoopDex runtime state (created in target project)
 .loop-agent/
 
 # Accidental literal brace-expansion directories (Windows shell quirk)

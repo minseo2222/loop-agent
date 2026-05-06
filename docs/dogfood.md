@@ -1,10 +1,10 @@
-# Dogfooding loop-agent
+# Dogfooding LoopDex
 
-Use this guide when you want loop-agent to upgrade this repository with its own backlog loop.
+Use this guide when you want LoopDex to upgrade this repository with its own backlog loop.
 
 ## Start from a safe branch
 
-Do not run loop-agent against a dirty `main` branch. Start from a clean git tree, then create and switch to a dedicated branch:
+Do not run LoopDex against a dirty `main` branch. Start from a clean git tree, then create and switch to a dedicated branch:
 
 ```bash
 git status --short

@@ -1,4 +1,4 @@
-# loop-agent
+# LoopDex
 
 **Run an AI coding agent against a multi-task backlog overnight, with independent critic processes and per-task git rollback — using your existing ChatGPT Plus or Gemini subscription, no API keys, no Docker.**
 
@@ -15,15 +15,15 @@ Most autonomous coding tools fall into one of two camps:
 - **Single-shot or interactive** (`aider`, Codex CLI `/goal`, Cursor) — great for one task, but on long backlogs the context drifts and the same model "self-reviews" its own work inside one session.
 - **Heavy autonomous frameworks** (OpenHands, MetaGPT, Devin) — powerful, but require Docker, API keys, per-token billing, and a lot of setup.
 
-loop-agent sits in a narrow gap between them:
+LoopDex sits in a narrow gap between them:
 
 - You have **a backlog of tasks**, not a single goal.
 - You want the agent to run **for hours, unattended**, picking tasks one by one.
 - You want **review independence** — a separate process that did not see the implementer's reasoning.
-- You want **per-task review gates**: each task either passes review and commits, or loop-agent attempts a git-based rollback within the project.
+- You want **per-task review gates**: each task either passes review and commits, or LoopDex attempts a git-based rollback within the project.
 - You want to **pay nothing per token** — your ChatGPT Plus or Gemini OAuth quota covers it.
 
-If that matches you, loop-agent is built for that exact loop.
+If that matches you, LoopDex is built for that exact loop.
 
 ---
 
@@ -37,11 +37,11 @@ In single-context loops (including Codex `/goal`), the model that wrote the code
 
 ### 2. Per-task commit / rollback boundary
 
-After the deterministic final decision gates pass, the change is committed. On FAIL, loop-agent attempts to roll back the project working tree to the last good state. After 5 consecutive failures the task is marked BLOCKED and the loop moves on. You can wake up to a clear list of what passed, what was skipped, and why.
+After the deterministic final decision gates pass, the change is committed. On FAIL, LoopDex attempts to roll back the project working tree to the last good state. After 5 consecutive failures the task is marked BLOCKED and the loop moves on. You can wake up to a clear list of what passed, what was skipped, and why.
 
 ### 3. Resume-safe rate-limit handling
 
-When ChatGPT or Gemini rate-limits you, loop-agent rolls back any in-progress task, exits with code 2, and leaves state intact. Re-running the same command after the limit resets resumes from the next pending task. Failure count is not incremented.
+When ChatGPT or Gemini rate-limits you, LoopDex rolls back any in-progress task, exits with code 2, and leaves state intact. Re-running the same command after the limit resets resumes from the next pending task. Failure count is not incremented.
 
 ### 4. Failure-pattern feedback loop
 
@@ -57,7 +57,7 @@ Two shell scripts, two Python helpers, six prompt files. You can read the entire
 
 ---
 
-## When loop-agent is **not** the right tool
+## When LoopDex is **not** the right tool
 
 Be honest with yourself. If any of these match, use something else:
 
@@ -67,20 +67,20 @@ Be honest with yourself. If any of these match, use something else:
 - **You need a sandboxed VM with a web UI.** Use OpenHands.
 - **Your account / employer pays per token via API.** OpenHands, AutoGen, or any direct-API agent will give you more flexibility than wrapping a CLI.
 
-loop-agent shines specifically when you have a *multi-task backlog* and want it ground through *unattended* with *hard review gates*.
+LoopDex shines specifically when you have a *multi-task backlog* and want it ground through *unattended* with *hard review gates*.
 
 ---
 
 ## ⚠️ Safety notice — read before running
 
-loop-agent runs AI agents **autonomously** and **executes code they generate without human approval at each step**. By default, `LOOP_RISK_MODE=unattended` keeps permissive CLI flags so the loop can run unattended:
+LoopDex runs AI agents **autonomously** and **executes code they generate without human approval at each step**. By default, `LOOP_RISK_MODE=unattended` keeps permissive CLI flags so the loop can run unattended:
 
 - The bundled `.claude/settings.json` sets `"defaultMode": "bypassPermissions"`.
 - Codex runs with `--dangerously-bypass-approvals-and-sandbox`.
 - The default Gemini flags include `--yolo`, which bypasses the CLI's sandbox/approval prompts.
 - The loop calls `git commit` and `git rollback` on the target project automatically.
 
-Set `LOOP_RISK_MODE=safe` to avoid loop-agent's built-in Codex and Gemini bypass flags where the wrapped CLI supports that. Safe mode is not a sandbox; the agent and verify commands still run with your shell permissions.
+Set `LOOP_RISK_MODE=safe` to avoid LoopDex's built-in Codex and Gemini bypass flags where the wrapped CLI supports that. Safe mode is not a sandbox; the agent and verify commands still run with your shell permissions.
 
 See [`docs/security.md`](docs/security.md) for security boundaries and known limitations.
 
@@ -88,7 +88,7 @@ Because of this, you should:
 
 1. **Run only against a dedicated project directory** under version control. Never point it at your home directory, system folders, or a repo with uncommitted work you cannot afford to lose.
 2. **Start run mode from a clean tree.** Explicit `run` requires no uncommitted project changes before agent work begins, so rollback has a clear pre-task snapshot.
-3. **Run unattended work on a dedicated git branch.** loop-agent does not switch branches by default; create and switch to the branch yourself before running it. Optionally set `LOOP_REQUIRE_BRANCH_PREFIX` to enforce a branch prefix before explicit `run` starts.
+3. **Run unattended work on a dedicated git branch.** LoopDex does not switch branches by default; create and switch to the branch yourself before running it. Optionally set `LOOP_REQUIRE_BRANCH_PREFIX` to enforce a branch prefix before explicit `run` starts.
 3. **Prefer an isolated environment** (a fresh VM, container, or throwaway workspace) — at minimum a dedicated user account.
 4. **Choose `LOOP_RISK_MODE=safe` or review `.claude/settings.json` and `LOOP_GEMINI_FLAGS`** if you do not want built-in bypass-permission flags.
 5. **Treat planning docs as untrusted input** if they came from outside your team — prompt-injected docs can steer the agent.
@@ -147,7 +147,7 @@ FAIL → git rollback + failure count +1 (5 failures → BLOCKED)
 | **Rate limit reached** | Safe exit + auto rollback | **2** |
 | Ctrl+C | State files auto-restored | 130 |
 
-Completed backlog is a successful terminal state: when there is no pending work, loop-agent reports success and exits 0 even if no task ran in that invocation.
+Completed backlog is a successful terminal state: when there is no pending work, LoopDex reports success and exits 0 even if no task ran in that invocation.
 
 Ordinary `FAIL` is reserved for implementation, review, verify, scope-gate, or no-change failures that roll back work and increment `Fail count`. `SCOPE_EXPAND` and `SPLIT_TASK` are blocked policy outcomes, not ordinary failures. They create review proposals, block the active task, report the reason and action required, and leave `Fail count` unchanged.
 
@@ -177,7 +177,7 @@ codex login   # opens browser for ChatGPT account login
 
 ### B. Using Gemini CLI
 
-loop-agent does not call the Gemini API directly — it runs the `gemini` CLI command.
+LoopDex does not call the Gemini API directly — it runs the `gemini` CLI command.
 
 Authentication method determines quota and cost:
 
@@ -187,11 +187,11 @@ Authentication method determines quota and cost:
 
 Avoid unexpected charges by verifying which authentication method is active.
 
-### Install loop-agent
+### Install LoopDex
 
 ```bash
-git clone https://github.com/minseo2222/loop-agent.git
-cd loop-agent
+git clone https://github.com/minseo2222/LoopDex.git
+cd LoopDex
 chmod +x loop.sh    # not needed on Windows Git Bash
 ```
 
@@ -257,7 +257,7 @@ git checkout -b loop/my-work
 LOOP_REQUIRE_BRANCH_PREFIX=loop/ ./loop.sh run --project <project> --iterations 5 --cli codex
 ```
 
-loop-agent does not switch branches by default. `LOOP_REQUIRE_BRANCH_PREFIX` is optional; when set for explicit `run`, startup fails unless the current git branch starts with the configured prefix.
+LoopDex does not switch branches by default. `LOOP_REQUIRE_BRANCH_PREFIX` is optional; when set for explicit `run`, startup fails unless the current git branch starts with the configured prefix.
 
 Risk mode examples:
 
@@ -265,7 +265,7 @@ Risk mode examples:
 # Default: preserves built-in bypass flags for unattended runs
 LOOP_RISK_MODE=unattended ./loop.sh run --project /path/to/myproject --iterations 5 --cli codex
 
-# Avoids loop-agent's built-in bypass flags where the wrapped CLI supports that
+# Avoids LoopDex's built-in bypass flags where the wrapped CLI supports that
 LOOP_RISK_MODE=safe ./loop.sh run --project /path/to/myproject --iterations 5 --cli gemini
 ```
 
@@ -294,7 +294,7 @@ Status and doctor commands:
 
 See [`tests/README.md`](tests/README.md) for E2E test notes. The fake CLI tests use local deterministic test doubles and do not require Codex or Gemini.
 
-For using loop-agent to upgrade this repository itself, see the [dogfood guide](docs/dogfood.md).
+For using LoopDex to upgrade this repository itself, see the [dogfood guide](docs/dogfood.md).
 
 Run the happy-path E2E test:
 
@@ -318,13 +318,13 @@ The fake CLI is for deterministic testing only, not production use.
 
 ### Benchmarks
 
-The benchmark runner exercises known PASS and FAIL scenarios and reports whether the loop made the correct final decision. A key metric is the false PASS rate: cases where loop-agent incorrectly accepts a bad implementation. Benchmark reporting derives metrics from machine-readable events, backlog state, and git commits, not from `.loop-agent/progress_window.md`.
+The benchmark runner exercises known PASS and FAIL scenarios and reports whether the loop made the correct final decision. A key metric is the false PASS rate: cases where LoopDex incorrectly accepts a bad implementation. Benchmark reporting derives metrics from machine-readable events, backlog state, and git commits, not from `.loop-agent/progress_window.md`.
 
 ---
 
 ## Backlog generation
 
-The backlog is the single source of truth for what loop-agent builds. Four files are involved:
+The backlog is the single source of truth for what LoopDex builds. Four files are involved:
 
 | File | Role |
 |------|------|
@@ -339,7 +339,7 @@ Backlog tasks use `[ ]` for pending work, `[x]` for completed work, and `[!]` fo
 
 ### Markdown backlog lint contract
 
-loop-agent retains the current markdown backlog format in `.loop-agent/backlog.md`. Each task must have a valid task ID and these fields: `Size`, `Files`, `Description`, `Completion criteria`, `Depends`, `Fail count`, and at least one `verify:` command in the completion criteria. `Size` must be `Small` or `Medium`, and `Files` must list non-empty relative project paths.
+LoopDex retains the current markdown backlog format in `.loop-agent/backlog.md`. Each task must have a valid task ID and these fields: `Size`, `Files`, `Description`, `Completion criteria`, `Depends`, `Fail count`, and at least one `verify:` command in the completion criteria. `Size` must be `Small` or `Medium`, and `Files` must list non-empty relative project paths.
 
 Check a backlog before running it with:
 
@@ -443,7 +443,7 @@ Each run acquires `.loop-agent/loop.lock` before modifying loop state. A second 
 
 ### Rollback boundaries
 
-Rollback is per task and git-based. On implementation failure, verify failure, critic failure, out-of-scope changes, state-file modification, or rate-limit exit during implementation/review, loop-agent restores the project to the pre-task working tree state. Shell evidence and loop-owned reports under `.loop-agent/` may be preserved for debugging, and files that were already committed by earlier passed tasks are not rolled back. Rollback depends on git state and the current working tree; it is not protection against commands that affect files outside the project, external services, credentials, system settings, or changes already committed in earlier passed tasks.
+Rollback is per task and git-based. On implementation failure, verify failure, critic failure, out-of-scope changes, state-file modification, or rate-limit exit during implementation/review, LoopDex restores the project to the pre-task working tree state. Shell evidence and loop-owned reports under `.loop-agent/` may be preserved for debugging, and files that were already committed by earlier passed tasks are not rolled back. Rollback depends on git state and the current working tree; it is not protection against commands that affect files outside the project, external services, credentials, system settings, or changes already committed in earlier passed tasks.
 
 Safety failures are recorded in raw `.loop-agent/progress.txt` evidence. When `.loop-agent/progress_window.md` is available, it summarizes recent progress and failure context for agent prompts, but it is not the system source of truth.
 
@@ -453,7 +453,7 @@ If an agent modifies state files under `.loop-agent/` (backlog, progress, etc.),
 
 ### Secret path guard
 
-After Implementer runs, loop-agent blocks changes to obvious secret-like paths such as `.env`, private key filenames, and paths containing `private_key`. This guard is path-based only: it does not scan file contents for credentials, does not catch every secret naming pattern, and does not make loop-agent a sandbox.
+After Implementer runs, LoopDex blocks changes to obvious secret-like paths such as `.env`, private key filenames, and paths containing `private_key`. This guard is path-based only: it does not scan file contents for credentials, does not catch every secret naming pattern, and does not make LoopDex a sandbox.
 
 ### Verify command gate
 
@@ -628,7 +628,7 @@ If the process exited with code 2, wait for the limit to reset and run the same 
 ## File structure
 
 ```
-loop-agent/
+LoopDex/
   loop.sh                              ← entry point
   backlog_manager.py                   ← backlog.md parsing and atomic updates
   progress_window.py                   ← progress.txt sliding window + truncation
@@ -659,7 +659,7 @@ Watch usage and cost when using an API key. The free tier has per-minute request
 
 ## Comparison with related tools
 
-| | loop-agent | Codex `/goal` | aider | OpenHands | gpt-engineer |
+| | LoopDex | Codex `/goal` | aider | OpenHands | gpt-engineer |
 |---|---|---|---|---|---|
 | Multi-task backlog from docs | ✅ | ❌ | ❌ | partial | ❌ |
 | Independent-process critic | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -671,18 +671,18 @@ Watch usage and cost when using an API key. The free tier has per-minute request
 | Web UI / dashboard | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Interactive conversation | ❌ | partial | ✅ | ✅ | ❌ |
 
-`/goal`, `aider`, OpenHands, and gpt-engineer are all excellent at what they do. loop-agent fills the specific slot of *unattended multi-task batches with hard review gates on top of subscription CLIs*.
+`/goal`, `aider`, OpenHands, and gpt-engineer are all excellent at what they do. LoopDex fills the specific slot of *unattended multi-task batches with hard review gates on top of subscription CLIs*.
 
 ---
 
 ## Legal & disclaimers
 
-- **Third-party services.** loop-agent invokes external CLIs (OpenAI Codex, Google Gemini, and optionally Anthropic Claude Code). Your planning documents, source code, and prompts are transmitted to those providers under their own privacy and usage policies. Do not feed sensitive personal data, regulated information, or third-party confidential material unless your use of those providers permits it.
-- **Terms of Service.** You are responsible for ensuring that your use of loop-agent — including automated, looped invocation of paid CLIs — complies with the Terms of Service of OpenAI, Google, Anthropic, and any other upstream provider. The authors of loop-agent do not represent that any particular usage pattern is permitted by those providers, and accept no liability for account suspensions, billing, or other consequences arising from such use.
+- **Third-party services.** LoopDex invokes external CLIs (OpenAI Codex, Google Gemini, and optionally Anthropic Claude Code). Your planning documents, source code, and prompts are transmitted to those providers under their own privacy and usage policies. Do not feed sensitive personal data, regulated information, or third-party confidential material unless your use of those providers permits it.
+- **Terms of Service.** You are responsible for ensuring that your use of LoopDex — including automated, looped invocation of paid CLIs — complies with the Terms of Service of OpenAI, Google, Anthropic, and any other upstream provider. The authors of LoopDex do not represent that any particular usage pattern is permitted by those providers, and accept no liability for account suspensions, billing, or other consequences arising from such use.
 - **Trademarks.** "ChatGPT", "Codex", "GPT" are trademarks of OpenAI. "Gemini", "Vertex AI", "Google Cloud", "Google AI Studio" are trademarks of Google LLC. "Claude", "Claude Code" are trademarks of Anthropic, PBC. "Windows", "Microsoft Store" are trademarks of Microsoft Corporation. All other product names mentioned are property of their respective owners. Use here is nominative and does not imply endorsement or affiliation.
 - **Model names.** Default model identifiers in this repository (e.g. `gpt-5.5`, `gemini-3.1-pro-preview`) are examples and may not match the model IDs your account currently has access to. Override them via the documented environment variables.
-- **Autonomous execution.** As stated in the Safety notice above, loop-agent runs AI agents that generate and execute code without per-step human approval. The user is solely responsible for selecting an appropriate target directory and runtime environment.
-- **Input content.** You retain ownership of any planning documents and source code you provide. By running loop-agent you confirm you have the right to share that content with the upstream LLM providers you have configured.
+- **Autonomous execution.** As stated in the Safety notice above, LoopDex runs AI agents that generate and execute code without per-step human approval. The user is solely responsible for selecting an appropriate target directory and runtime environment.
+- **Input content.** You retain ownership of any planning documents and source code you provide. By running LoopDex you confirm you have the right to share that content with the upstream LLM providers you have configured.
 
 ---
 

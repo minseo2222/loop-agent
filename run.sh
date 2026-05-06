@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-#  loop-agent · run.sh
+#  LoopDex · run.sh
 #
 #  Usage:
 #    ./run.sh [options] <doc-path>

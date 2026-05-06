@@ -6,7 +6,7 @@ Automatic backlog mutation is disabled by default. Run mode keeps semantic backl
 
 Agents may report that backlog scope, task order, or dependencies need review. They must not apply those changes automatically under the default policy.
 
-Human review is required to unblock any proposal-only mutation. If the proposal is accepted, a human edits the backlog deliberately, such as updating `Files`, dependencies, task text, or child tasks, then reruns loop-agent. If the proposal is rejected, a human either revises the original task so it fits the approved scope or leaves the task blocked; the runtime must not infer rejection by mutating backlog semantics automatically.
+Human review is required to unblock any proposal-only mutation. If the proposal is accepted, a human edits the backlog deliberately, such as updating `Files`, dependencies, task text, or child tasks, then reruns LoopDex. If the proposal is rejected, a human either revises the original task so it fits the approved scope or leaves the task blocked; the runtime must not infer rejection by mutating backlog semantics automatically.
 
 ## SCOPE_EXPAND Default Policy
 
@@ -25,7 +25,7 @@ Human action required: accept by editing the backlog Files or dependencies, or r
 Fail count: unchanged at 2.
 ```
 
-To unblock, a human reviews the proposal, intentionally edits the backlog scope or dependencies if the change is accepted, and reruns loop-agent. If the proposal is rejected, the human should revise the task or leave it blocked instead of relying on automatic mutation.
+To unblock, a human reviews the proposal, intentionally edits the backlog scope or dependencies if the change is accepted, and reruns LoopDex. If the proposal is rejected, the human should revise the task or leave it blocked instead of relying on automatic mutation.
 
 ## SPLIT_TASK Default Policy
 
@@ -33,7 +33,7 @@ By default, `SPLIT_TASK` blocks the active task and creates a split proposal for
 
 `SPLIT_TASK` is not counted as an implementation failure. The task `Fail count` is not incremented when the loop blocks for a split proposal.
 
-Normal run mode does not insert child tasks, replace the parent task, rewrite dependencies, or otherwise change backlog structure. To unblock, a human reviews the proposal, intentionally edits the backlog if the split is accepted, and reruns loop-agent. If the split is rejected, the human should revise the original task so it is implementable within the approved boundary or leave it blocked; the loop does not automatically restore, rewrite, or retry it as an ordinary failure.
+Normal run mode does not insert child tasks, replace the parent task, rewrite dependencies, or otherwise change backlog structure. To unblock, a human reviews the proposal, intentionally edits the backlog if the split is accepted, and reruns LoopDex. If the split is rejected, the human should revise the original task so it is implementable within the approved boundary or leave it blocked; the loop does not automatically restore, rewrite, or retry it as an ordinary failure.
 
 Example split proposal:
 
@@ -74,7 +74,7 @@ No other semantic backlog mutation is allowed without a new policy update.
 
 Automatic backlog mutation remains disabled by default. A `SCOPE_EXPAND` verdict writes a proposal and does not update task `Files` unless `LOOP_ALLOW_AUTO_SCOPE_EXPAND=1` is set.
 
-When `LOOP_ALLOW_AUTO_SCOPE_EXPAND=1` is set, loop-agent may append valid requested files to only the active task `Files` list. The guarded path must enforce these limits:
+When `LOOP_ALLOW_AUTO_SCOPE_EXPAND=1` is set, LoopDex may append valid requested files to only the active task `Files` list. The guarded path must enforce these limits:
 
 - Maximum added files: 3 files per scope expansion.
 - Path lint: no absolute paths, no parent traversal, no `.loop-agent/` paths, and no secret-like paths such as `.env`, private key files, or paths containing `private_key`.
@@ -85,7 +85,7 @@ When `LOOP_ALLOW_AUTO_SCOPE_EXPAND=1` is set, loop-agent may append valid reques
 
 Automatic task splitting is disabled by default. A `SPLIT_TASK` verdict writes a split proposal and does not update the backlog unless `LOOP_ALLOW_AUTO_TASK_SPLIT=1` is set.
 
-When `LOOP_ALLOW_AUTO_TASK_SPLIT=1` is set, loop-agent may replace only the active task with reviewed child task specs from the Impl Critic `## Split task` section. The guarded path must enforce these limits:
+When `LOOP_ALLOW_AUTO_TASK_SPLIT=1` is set, LoopDex may replace only the active task with reviewed child task specs from the Impl Critic `## Split task` section. The guarded path must enforce these limits:
 
 - Maximum child tasks: 2 child tasks per split.
 - Child task IDs: child IDs must extend the parent ID in order, such as `Task 12.6.1` and `Task 12.6.2`.
@@ -98,7 +98,7 @@ When `LOOP_ALLOW_AUTO_TASK_SPLIT=1` is set, loop-agent may replace only the acti
 
 Automatic dependency insertion is disabled by default. A `DEPENDENCY_INSERT` verdict writes a proposal, blocks the active task for review, and does not insert backlog tasks unless `LOOP_ALLOW_AUTO_DEPENDENCY_INSERT=1` is set.
 
-When `LOOP_ALLOW_AUTO_DEPENDENCY_INSERT=1` is set, loop-agent may insert reviewed dependency task specs before only the active task. The guarded path must enforce these limits:
+When `LOOP_ALLOW_AUTO_DEPENDENCY_INSERT=1` is set, LoopDex may insert reviewed dependency task specs before only the active task. The guarded path must enforce these limits:
 
 - Maximum inserted tasks: 2 dependency tasks per insertion.
 - Inserted task fields: each inserted task must have a unique valid task ID, non-empty name, valid `Files`, valid `Verify`, and non-empty completion criteria.

@@ -6,7 +6,7 @@ Loop-agent runs AI agents and backlog verify commands with the user's shell perm
 
 Planning documents, backlog entries, and task descriptions are untrusted input. A prompt injection in those files can try to steer Planner, Implementer, or Critic behavior, request out-of-scope edits, hide unsafe instructions, or ask the agent to ignore project rules. Review planning docs and generated backlog tasks before running unattended work.
 
-Backlog verify commands are also part of the threat model. Dangerous verify commands can delete files, read or print secrets, modify system settings, contact network services, install software, or run hidden shell behavior. loop-agent checks extracted verify commands with a basic denylist before Planner or Implementer runs, but passing that check does not mean a command is safe.
+Backlog verify commands are also part of the threat model. Dangerous verify commands can delete files, read or print secrets, modify system settings, contact network services, install software, or run hidden shell behavior. LoopDex checks extracted verify commands with a basic denylist before Planner or Implementer runs, but passing that check does not mean a command is safe.
 
 The denylist blocks these command forms when detected:
 
@@ -21,21 +21,21 @@ Verify commands still run through the shell when they pass this check. Shell exe
 
 Explicit `run` mode expects a clean tree before agent calls begin. Commit or stash user work first so per-task rollback has a clear git snapshot.
 
-Run unattended work on a dedicated branch. loop-agent does not switch branches for you; optionally set `LOOP_REQUIRE_BRANCH_PREFIX` to make explicit `run` fail unless the current branch starts with the configured prefix.
+Run unattended work on a dedicated branch. LoopDex does not switch branches for you; optionally set `LOOP_REQUIRE_BRANCH_PREFIX` to make explicit `run` fail unless the current branch starts with the configured prefix.
 
 ## Risk Mode Boundaries
 
-`LOOP_RISK_MODE=unattended` preserves loop-agent's built-in bypass flags for Codex and Gemini so the loop can run without per-step approval prompts.
+`LOOP_RISK_MODE=unattended` preserves LoopDex's built-in bypass flags for Codex and Gemini so the loop can run without per-step approval prompts.
 
 `LOOP_RISK_MODE=safe` avoids those built-in bypass flags where the wrapped CLI supports that. Safe mode is still not a sandbox: agent commands, shell verify commands, and provider CLIs run with user permissions.
 
 ## Secret Path Guard
 
-After Implementer runs, loop-agent blocks changes to a small set of obvious secret-like paths before verify or PASS commit. Blocked examples include `.env`, `.env.local`, `cert.pem`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `id_rsa`, `id_ed25519`, and paths containing `private_key`.
+After Implementer runs, LoopDex blocks changes to a small set of obvious secret-like paths before verify or PASS commit. Blocked examples include `.env`, `.env.local`, `cert.pem`, `.ssh/id_rsa`, `.ssh/id_ed25519`, `id_rsa`, `id_ed25519`, and paths containing `private_key`.
 
-When this guard matches, loop-agent writes evidence under `.loop-agent/evidence/loop-N/secret_paths.txt`, records the task failure, rolls back implementation changes, and skips the PASS commit.
+When this guard matches, LoopDex writes evidence under `.loop-agent/evidence/loop-N/secret_paths.txt`, records the task failure, rolls back implementation changes, and skips the PASS commit.
 
-This guard is path-based only. It is not full secret scanning, does not inspect file contents for credentials, does not catch every secret file name, and does not make loop-agent a sandbox. A command can still read or expose secret files even if no secret-like path is modified.
+This guard is path-based only. It is not full secret scanning, does not inspect file contents for credentials, does not catch every secret file name, and does not make LoopDex a sandbox. A command can still read or expose secret files even if no secret-like path is modified.
 
 ## Rollback Limits
 

@@ -703,9 +703,10 @@ case "$LOOP_CLI" in
       exit 1
     fi
 
-    # Check ChatGPT login (codex uses ChatGPT account login)
+    # Check ChatGPT login (codex uses ChatGPT account login).
+    # Skipped when running against the fake CLI (e2e tests set LOOP_FAKE_SCENARIO).
     CODEX_AUTH_FILE="${HOME}/.codex/auth.json"
-    if [[ ! -f "$CODEX_AUTH_FILE" ]]; then
+    if [[ -z "${LOOP_FAKE_SCENARIO:-}" ]] && [[ ! -f "$CODEX_AUTH_FILE" ]]; then
       add_result "Before start: ERROR (prerequisites failed)"
       print_results
       err "ChatGPT login required."

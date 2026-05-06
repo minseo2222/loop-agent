@@ -182,12 +182,73 @@ PASS
 EOF
 }
 
+run_scope_expand_scenario() {
+  prompt="$1"
+
+  if has_prompt_text "$prompt" "implementation critic" || has_prompt_text "$prompt" "impl critic"; then
+    cat <<'EOF'
+# Implementation Critique - Loop 1
+
+VERDICT: SCOPE_EXPAND
+
+## Requested files
+- docs/extra_scope.md
+EOF
+    return 0
+  fi
+
+  run_pass_scenario "$prompt"
+}
+
+run_split_task_scenario() {
+  prompt="$1"
+
+  if has_prompt_text "$prompt" "implementation critic" || has_prompt_text "$prompt" "impl critic"; then
+    cat <<'EOF'
+# Implementation Critique - Loop 1
+
+VERDICT: SPLIT_TASK
+
+## Suggested child tasks
+
+### Child Task 1: Prepare split task fixture
+- Files:
+  - `src/app.txt`
+- Verify:
+  - `test -f src/app.txt`
+- Depends:
+  - none
+- Completion criteria:
+  - [ ] `src/app.txt` contains the prepared split task fixture state.
+
+### Child Task 2: Complete split task fixture
+- Files:
+  - `src/app.txt`
+- Verify:
+  - `grep -q "split task complete" src/app.txt`
+- Depends:
+  - Child Task 1
+- Completion criteria:
+  - [ ] `src/app.txt` contains `split task complete`.
+EOF
+    return 0
+  fi
+
+  run_pass_scenario "$prompt"
+}
+
 run_scenario() {
   prompt="$1"
 
   case "${LOOP_FAKE_SCENARIO:-pass}" in
     pass)
       run_pass_scenario "$prompt"
+      ;;
+    scope_expand)
+      run_scope_expand_scenario "$prompt"
+      ;;
+    split_task)
+      run_split_task_scenario "$prompt"
       ;;
     fail)
       cat <<'EOF'
@@ -218,6 +279,15 @@ case "${1:-}" in
     ;;
   --self-test)
     LOOP_FAKE_SCENARIO=pass "$0" </dev/null >/dev/null || exit 1
+    LOOP_FAKE_SCENARIO=scope_expand "$0" "impl critic" </dev/null | grep -q "VERDICT: SCOPE_EXPAND" || exit 1
+    split_task_output=$(LOOP_FAKE_SCENARIO=split_task "$0" "impl critic" </dev/null) || exit 1
+    printf '%s\n' "$split_task_output" | grep -q "VERDICT: SPLIT_TASK" || exit 1
+    child_task_count=$(printf '%s\n' "$split_task_output" | grep -c "^### Child Task ")
+    [ "$child_task_count" -ge 2 ] || exit 1
+    printf '%s\n' "$split_task_output" | grep -q "Files" || exit 1
+    printf '%s\n' "$split_task_output" | grep -q "Verify" || exit 1
+    printf '%s\n' "$split_task_output" | grep -q "Depends" || exit 1
+    printf '%s\n' "$split_task_output" | grep -q "Completion criteria" || exit 1
     LOOP_FAKE_SCENARIO=fail "$0" </dev/null >/dev/null || exit 1
     LOOP_FAKE_SCENARIO=malformed "$0" </dev/null >/dev/null || exit 1
     if LOOP_FAKE_SCENARIO=rate_limit "$0" </dev/null >/dev/null 2>/dev/null; then

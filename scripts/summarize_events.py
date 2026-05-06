@@ -132,7 +132,8 @@ def collect_failures(events, tasks):
         if kind == "verify_result" and status == "FAIL":
             failures.append(f"{label}: verify failed")
         elif kind == "rollback":
-            failures.append(f"{label}: rollback - {event.get('reason') or 'rollback'}")
+            reason = str(event.get("reason") or "rollback")
+            failures.append(f"{label}: rollback - {reason}")
         elif kind == "decision" and status in {"FAIL", "ERROR"}:
             failures.append(f"{label}: {status} - {event.get('reason') or event.get('stage') or status}")
     for task in tasks:
@@ -153,6 +154,36 @@ def collect_blocked(tasks):
         if task["marker"] == "!" or task["meta"].get("status", "").upper() == "BLOCKED" or reason:
             blocked.append(f"{task_label(task['id'], task['name'])}: {reason or 'blocked'}")
     return unique(blocked)
+
+
+def collect_policy_blocks(events):
+    blocks = []
+    for event in events:
+        if event_type(event) != "blocked":
+            continue
+        block_type = str(event.get("block_type") or "BLOCKED").upper()
+        if block_type == "FAIL":
+            continue
+        reason = event.get("reason") or "blocked"
+        detail = f"{task_label(str(event.get('task_id', '')), str(event.get('task_name', '')))}: BLOCKED: {block_type} - {reason}; policy block"
+        child_count = event.get("suggested_child_task_count")
+        if block_type == "SPLIT_TASK" and child_count not in (None, ""):
+            detail += f"; suggested child task count: {child_count}"
+        requested_files = event.get("requested_files")
+        if requested_files:
+            detail += f"; requested files: {requested_files}"
+        action = event.get("recommended_action")
+        if not action:
+            if block_type == "SCOPE_EXPAND":
+                action = "Review the scope expansion proposal and manually update backlog.md Files if appropriate."
+            elif block_type == "SPLIT_TASK":
+                action = "Review the split proposal and manually replace the blocked task with child tasks if appropriate."
+        if action:
+            detail += f"; Action required: {action}; Recommended action: {action}"
+        if event.get("fail_count_unchanged") is True:
+            detail += "; Fail count unchanged; fail count unchanged"
+        blocks.append(detail)
+    return unique(blocks)
 
 
 def collect_proposals(path):
@@ -204,6 +235,7 @@ def write_report(args):
     lines += section("Completed tasks", collect_completed(events, tasks))
     lines += section("Commit hashes", collect_commits(events, tasks))
     lines += section("Failed attempts", collect_failures(events, tasks))
+    lines += section("Blocked policy outcomes", collect_policy_blocks(events))
     lines += section("Blocked tasks", collect_blocked(tasks))
     lines += section("Proposal files", collect_proposals(state_dir / "proposals"))
     lines += section("Evidence references", collect_evidence(events, tasks))

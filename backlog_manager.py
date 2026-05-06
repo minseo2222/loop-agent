@@ -62,10 +62,46 @@ def write_file(path, content):
             pass
         raise
 
+TASK_STATUS_MARKERS = {
+    'pending': ' ',
+    'done': 'x',
+    'blocked': '!',
+}
+TASK_MARKER_STATUSES = {marker: status for status, marker in TASK_STATUS_MARKERS.items()}
+TASK_MARKER_PATTERN = r'\[([ x!])\]'
+MALFORMED_BLOCKED_MARKER = '[!\\]'
+
+def render_task_marker(status):
+    return '[' + TASK_STATUS_MARKERS[status] + ']'
+
+def task_header_pattern(task_id=None):
+    task_pattern = re.escape(task_id) if task_id else r'Task [\d.]+'
+    return r'^- ' + TASK_MARKER_PATTERN + r' (' + task_pattern + r':[^\n]*)'
+
+def task_status_from_marker(marker):
+    return TASK_MARKER_STATUSES[marker]
+
+def replace_task_marker(content, task_id, status, only_statuses=None):
+    marker = render_task_marker(status)
+    allowed_statuses = set(only_statuses or TASK_STATUS_MARKERS)
+
+    def replace(match):
+        if task_status_from_marker(match.group(1)) not in allowed_statuses:
+            return match.group(0)
+        return f'- {marker} {match.group(2)}'
+
+    return re.sub(
+        task_header_pattern(task_id),
+        replace,
+        content,
+        count=1,
+        flags=re.MULTILINE
+    )
+
 def find_task_section(content, task_id):
     """Return the start position of a task and the start of the next task (or end of file)."""
     pattern = re.compile(
-        r'^- \[([ x!])\] ' + re.escape(task_id) + r':[^\n]*\n',
+        task_header_pattern(task_id) + r'\n',
         re.MULTILINE
     )
     m = pattern.search(content)
@@ -76,7 +112,7 @@ def find_task_section(content, task_id):
 
     # Find the start of the next task (- [ ] Task, ## Phase, or end of file)
     next_task = re.search(
-        r'\n- \[[ x!]\] Task |\n## ',
+        r'\n- ' + TASK_MARKER_PATTERN + r' Task |\n## ',
         content[m.end():]
     )
     if next_task:
@@ -243,7 +279,7 @@ def parse_tasks(content):
     """Parse tasks from backlog.md."""
     tasks = []
     pattern = re.compile(
-        r'^- \[([ x!])\] (Task [\d.]+:[^\n]*)',
+        task_header_pattern(),
         re.MULTILINE
     )
     for m in pattern.finditer(content):
@@ -255,12 +291,7 @@ def parse_tasks(content):
         task_id = task_id_match.group(1).strip()
         task_name = task_id_match.group(2).strip()
 
-        if status_char == 'x':
-            status = 'done'
-        elif status_char == '!':
-            status = 'blocked'
-        else:
-            status = 'pending'
+        status = task_status_from_marker(status_char)
 
         # Parse only within the task section bounds
         sec_start, sec_end = find_task_section(content, task_id)
@@ -352,6 +383,66 @@ def replace_completed_index(content, completed_ids):
         return content[:first_heading.end()] + block + content[first_heading.end():]
     return block + content
 
+def _has_active_task_header(text):
+    return bool(re.search(r'^- \[(?: |!)\] Task [\d.]+:', text, re.MULTILINE))
+
+def _is_h2_section(section, heading):
+    first_line = section.split('\n', 1)[0].strip()
+    return first_line == heading
+
+def _is_phase_section(section):
+    first_line = section.split('\n', 1)[0]
+    return bool(re.match(r'^## Phase\b', first_line))
+
+def _section_has_useful_body(section):
+    for line in section.splitlines()[1:]:
+        stripped = line.strip()
+        if stripped and not stripped.startswith('## '):
+            return True
+    return False
+
+def cleanup_compacted_backlog(content):
+    h2_matches = list(re.finditer(r'^## .*$\n?', content, re.MULTILINE))
+    if not h2_matches:
+        return re.sub(r'\n{3,}', '\n\n', content).rstrip() + '\n'
+
+    preamble = content[:h2_matches[0].start()]
+    sections = []
+    for index, match in enumerate(h2_matches):
+        end = h2_matches[index + 1].start() if index + 1 < len(h2_matches) else len(content)
+        sections.append(content[match.start():end])
+
+    sections = [
+        section for section in sections
+        if not (_is_h2_section(section, '## Tasks') and not _has_active_task_header(section))
+    ]
+
+    kept = []
+    index = 0
+    while index < len(sections):
+        section = sections[index]
+        if not _is_phase_section(section):
+            kept.append(section)
+            index += 1
+            continue
+
+        group = [section]
+        index += 1
+        while index < len(sections) and not _is_phase_section(sections[index]):
+            group.append(sections[index])
+            index += 1
+
+        has_active_task = any(_has_active_task_header(part) for part in group)
+        has_useful_body = any(
+            _section_has_useful_body(part)
+            for part in group
+            if not _is_h2_section(part, '## Tasks')
+        )
+        if has_active_task or has_useful_body:
+            kept.extend(group)
+
+    return re.sub(r'\n{3,}', '\n\n', preamble + ''.join(kept)).rstrip() + '\n'
+
 def ordered_unique(values):
     result = []
     seen = set()
@@ -418,8 +509,7 @@ def cmd_next(backlog_file):
 
 def cmd_complete(backlog_file, task_id):
     content = read_file(backlog_file)
-    pattern = r'(- \[) \] (' + re.escape(task_id) + r':)'
-    new_content = re.sub(pattern, r'\1x] \2', content)
+    new_content = replace_task_marker(content, task_id, 'done', only_statuses=('pending',))
     if new_content == content:
         print('ERROR: task not found or already done')
         sys.exit(1)
@@ -434,12 +524,8 @@ def cmd_block(backlog_file, task_id, reason, verdict, evidence_path):
         sys.exit(1)
 
     section = content[sec_start:sec_end]
-    section = re.sub(
-        r'(- \[)[ x!](\] ' + re.escape(task_id) + r':[^\n]*\n)',
-        r'\1!\2',
-        section,
-        count=1
-    )
+    fail_count = extract_task_fail_count(section)
+    section = replace_task_marker(section, task_id, 'blocked')
     section = re.sub(r'  - Blocked reason:[^\n]*\n', '', section)
     section = re.sub(r'  - Last verdict:[^\n]*\n', '', section)
     section = re.sub(r'  - Evidence path:[^\n]*\n', '', section)
@@ -457,6 +543,7 @@ def cmd_block(backlog_file, task_id, reason, verdict, evidence_path):
             count=1
         )
     elif '  - Depends:' in section:
+        metadata = f'  - Fail count: {fail_count}\n' + metadata
         section = re.sub(
             r'(  - Depends:[^\n]*\n)',
             lambda m: m.group(1) + metadata,
@@ -464,9 +551,10 @@ def cmd_block(backlog_file, task_id, reason, verdict, evidence_path):
             count=1
         )
     else:
+        metadata = f'  - Fail count: {fail_count}\n' + metadata
         section = re.sub(
-            r'(- \[[ x!]\] ' + re.escape(task_id) + r':[^\n]*\n)',
-            lambda m: m.group(1) + metadata,
+            task_header_pattern(task_id) + r'\n',
+            lambda m: m.group(0) + metadata,
             section,
             count=1
         )
@@ -480,7 +568,7 @@ def _render_child_task(child, depends):
     criteria = child.get('completion_criteria') or []
 
     lines = [
-        f'- [ ] {child["id"]}: {child["name"]}',
+        f'- {render_task_marker("pending")} {child["id"]}: {child["name"]}',
         '  - Files: ' + ', '.join(f'`{file_path}`' for file_path in files),
         '  - Depends: ' + (', '.join(depends) if depends else 'none'),
         '  - Fail count: 0',
@@ -625,7 +713,7 @@ def _update_current_depends(section, current_id, final_dependency_id):
     depends_line = f'  - Depends: {final_dependency_id}\n'
     if files_match:
         return section[:files_match.end()] + depends_line + section[files_match.end():]
-    header_match = re.search(r'^- \[[ x!]\] ' + re.escape(current_id) + r':[^\n]*\n', section)
+    header_match = re.search(task_header_pattern(current_id) + r'\n', section)
     if header_match:
         return section[:header_match.end()] + depends_line + section[header_match.end():]
     return section
@@ -688,12 +776,7 @@ def _replace_depends_parent_with_child(content, parent_id, final_child_id):
     return re.sub(r'(?m)^(  - Depends:\s*)([^\n]+)$', replace_line, content)
 
 def _mark_parent_replaced(section, parent_id, reason, verdict, evidence_path, replaced_by):
-    section = re.sub(
-        r'(- \[)[ x!](\] ' + re.escape(parent_id) + r':[^\n]*\n)',
-        r'\1!\2',
-        section,
-        count=1
-    )
+    section = replace_task_marker(section, parent_id, 'blocked')
     for field in ('Blocked reason', 'Last verdict', 'Evidence path', 'Replaced by'):
         section = re.sub(r'  - ' + re.escape(field) + r':[^\n]*\n', '', section)
 
@@ -718,13 +801,17 @@ def _mark_parent_replaced(section, parent_id, reason, verdict, evidence_path, re
             count=1
         )
     return re.sub(
-        r'(- \[[ x!]\] ' + re.escape(parent_id) + r':[^\n]*\n)',
-        lambda m: m.group(1) + metadata,
+        task_header_pattern(parent_id) + r'\n',
+        lambda m: m.group(0) + metadata,
         section,
         count=1
     )
 
 def cmd_split(backlog_file, task_id, child_specs_json_file, reason, verdict, evidence_path):
+    if verdict == 'SPLIT_TASK':
+        print('ERROR: SPLIT_TASK must use block, not split')
+        sys.exit(1)
+
     content = read_file(backlog_file)
     sec_start, sec_end = find_task_section(content, task_id)
     if sec_start is None:
@@ -816,7 +903,7 @@ def cmd_compact(backlog_file, archive_file):
 
     merged_ids = ordered_unique(completed_index_ids + done_ids + archived_task_ids)
     compacted_content = replace_completed_index(compacted_content, merged_ids)
-    compacted_content = re.sub(r'\n{4,}', '\n\n\n', compacted_content).rstrip() + '\n'
+    compacted_content = cleanup_compacted_backlog(compacted_content)
     write_file(backlog_file, compacted_content)
 
     if archived_sections:
@@ -902,8 +989,8 @@ def cmd_fail(backlog_file, task_id, max_attempts=5, summary='', evidence_path=''
     else:
         # Insert after the first task line
         section_new = re.sub(
-            r'(- \[[ x!]\] ' + re.escape(task_id) + r':[^\n]*\n)',
-            lambda m: m.group(1) + failure_metadata,
+            task_header_pattern(task_id) + r'\n',
+            lambda m: m.group(0) + failure_metadata,
             section_clean,
             count=1
         )
@@ -912,8 +999,7 @@ def cmd_fail(backlog_file, task_id, max_attempts=5, summary='', evidence_path=''
 
     # Block the task after the configured number of failures.
     if new_fail >= max_attempts:
-        block_pattern = r'(- \[) \] (' + re.escape(task_id) + r':)'
-        new_content = re.sub(block_pattern, r'\1!] \2', new_content)
+        new_content = replace_task_marker(new_content, task_id, 'blocked', only_statuses=('pending',))
         print('BLOCKED')
     else:
         print(f'FAIL_COUNT:{new_fail}')
@@ -1046,11 +1132,39 @@ def _validate_task_dependencies(tasks, completed_ids=None):
 
     return errors
 
+def _find_malformed_task_markers(content):
+    errors = []
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        if MALFORMED_BLOCKED_MARKER in line:
+            errors.append(f'line {line_number}: malformed task marker [!\\]; use [!]')
+    return errors
+
+def _has_task_header(text):
+    return bool(re.search(r'^- ' + TASK_MARKER_PATTERN + r' Task [\d.]+:', text, re.MULTILINE))
+
+def _find_repeated_empty_tasks_sections(content):
+    errors = []
+    empty_tasks_lines = []
+    h2_matches = list(re.finditer(r'^## .*$\n?', content, re.MULTILINE))
+    for index, match in enumerate(h2_matches):
+        heading = match.group(0).strip()
+        if heading != '## Tasks':
+            continue
+        end = h2_matches[index + 1].start() if index + 1 < len(h2_matches) else len(content)
+        section = content[match.start():end]
+        if not _has_task_header(section):
+            empty_tasks_lines.append(content.count('\n', 0, match.start()) + 1)
+
+    for line_number in empty_tasks_lines[1:]:
+        errors.append(f'line {line_number}: empty repeated ## Tasks section; run backlog compaction cleanup')
+    return errors
+
 def cmd_lint(backlog_file):
     content = read_file(backlog_file)
     tasks = parse_tasks(content)
     completed_ids = extract_completed_ids(content)
-    errors = []
+    errors = _find_malformed_task_markers(content)
+    errors.extend(_find_repeated_empty_tasks_sections(content))
 
     for task in tasks:
         sec_start, sec_end = find_task_section(content, task['id'])

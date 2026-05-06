@@ -41,6 +41,57 @@ create_temp_minimal_project() {
   printf '%s\n' "$dir"
 }
 
+create_temp_scope_expand_project() {
+  local dir
+
+  dir=$(create_temp_project) || return 1
+  mkdir -p "$dir/.loop-agent" "$dir/src" || return 1
+  printf '%s\n' "initial content" >"$dir/src/app.txt" || return 1
+  cat >"$dir/.loop-agent/backlog.md" <<'EOF'
+# Backlog
+
+## Tasks
+
+- [ ] Task 1: Complete fixture app update
+  - Files: `src/app.txt`
+  - What to do: Write deterministic happy-path content to the fixture app file.
+  - Completion criteria:
+    - [ ] `src/app.txt` contains `happy path complete`.
+    - [ ] verify: `test "$(cat src/app.txt)" = "happy path complete"`
+EOF
+
+  git -C "$dir" add . || return 1
+  git -C "$dir" commit -q -m "Initial scope expand fixture" || return 1
+
+  printf '%s\n' "$dir"
+}
+
+create_temp_split_task_project() {
+  local dir
+
+  dir=$(create_temp_project) || return 1
+  git -C "$dir" config core.autocrlf false || return 1
+  mkdir -p "$dir/.loop-agent" "$dir/src" || return 1
+  printf '%s\n' "split task initial content" >"$dir/src/app.txt" || return 1
+  cat >"$dir/.loop-agent/backlog.md" <<'EOF'
+# Backlog
+
+## Tasks
+
+- [ ] Task 1: Complete oversized fixture app update
+  - Files: `src/app.txt`
+  - What to do: Complete the fixture app update that should be split into smaller tasks.
+  - Completion criteria:
+    - [ ] `src/app.txt` contains `split task complete`.
+    - [ ] verify: `grep -q "split task complete" src/app.txt`
+EOF
+
+  git -C "$dir" add . || return 1
+  git -C "$dir" commit -q -m "Initial split task fixture" || return 1
+
+  printf '%s\n' "$dir"
+}
+
 _project_factory_self_test() {
   local dir
 

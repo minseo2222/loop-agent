@@ -6,6 +6,54 @@ Automatic backlog mutation is disabled by default. Run mode keeps semantic backl
 
 Agents may report that backlog scope, task order, or dependencies need review. They must not apply those changes automatically under the default policy.
 
+Human review is required to unblock any proposal-only mutation. If the proposal is accepted, a human edits the backlog deliberately, such as updating `Files`, dependencies, task text, or child tasks, then reruns loop-agent. If the proposal is rejected, a human either revises the original task so it fits the approved scope or leaves the task blocked; the runtime must not infer rejection by mutating backlog semantics automatically.
+
+## SCOPE_EXPAND Default Policy
+
+By default, `SCOPE_EXPAND` blocks the active task and creates a proposal for human review. It does not mutate semantic fields, including `Files`, `Depends`, verify commands, completion criteria, description, or task ordering.
+
+`SCOPE_EXPAND` is not counted as an implementation failure. The task `Fail count` is not incremented when the loop blocks for a scope-expansion proposal.
+
+Example progress entry:
+
+```text
+Task 12.3 blocked with SCOPE_EXPAND
+Blocked status: [!] blocked for human review.
+Blocked reason: implementation needs src/new_file.ts, which is outside the approved Files scope.
+Evidence/proposal: .loop-agent/evidence/loop-9/scope_expand_proposal.md
+Human action required: accept by editing the backlog Files or dependencies, or reject by revising/leaving the task blocked before retry.
+Fail count: unchanged at 2.
+```
+
+To unblock, a human reviews the proposal, intentionally edits the backlog scope or dependencies if the change is accepted, and reruns loop-agent. If the proposal is rejected, the human should revise the task or leave it blocked instead of relying on automatic mutation.
+
+## SPLIT_TASK Default Policy
+
+By default, `SPLIT_TASK` blocks the active task and creates a split proposal for human review. It happens when the active task is too broad for the current loop boundary or discovery shows that ordered child tasks are needed before implementation can continue.
+
+`SPLIT_TASK` is not counted as an implementation failure. The task `Fail count` is not incremented when the loop blocks for a split proposal.
+
+Normal run mode does not insert child tasks, replace the parent task, rewrite dependencies, or otherwise change backlog structure. To unblock, a human reviews the proposal, intentionally edits the backlog if the split is accepted, and reruns loop-agent. If the split is rejected, the human should revise the original task so it is implementable within the approved boundary or leave it blocked; the loop does not automatically restore, rewrite, or retry it as an ordinary failure.
+
+Example split proposal:
+
+```text
+Task 8.4 blocked with SPLIT_TASK
+Blocked status: [!] blocked for human review.
+Blocked reason: current task requires separate model and UI changes.
+Evidence/proposal: .loop-agent/evidence/loop-11/split_task_proposal.md
+Human action required: accept by replacing the backlog task with reviewed child tasks, or reject by revising/leaving the task blocked before retry.
+Fail count: unchanged at 1.
+
+Proposed child tasks:
+- Task 8.4.1: Add export job model
+  Files: src/export_jobs.ts
+  Depends: Task 8.3
+- Task 8.4.2: Add export job controls
+  Files: src/export_controls.ts
+  Depends: Task 8.4.1
+```
+
 ## Benchmark Coverage
 
 Automatic mutation must not be enabled until benchmark coverage exists for accepted, rejected, and blocked mutation outcomes. The benchmark must include proposal-only behavior, scope gate behavior, event logging, and rollback-safe failure paths.

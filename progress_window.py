@@ -8,7 +8,7 @@ import tempfile
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 MAX_VALUE_CHARS = 300
-MAX_SUMMARY_CHARS = 900
+MAX_SUMMARY_CHARS = 1800
 MAX_MARKDOWN_CHARS = 14000
 
 
@@ -84,7 +84,13 @@ def summarize_section(section):
     interesting = re.compile(
         r'^(=== Loop |Time:|Task:|Plan Critic verdict:|Impl Critic verdict:|'
         r'Verify result:|Verify results:|Verify exit codes:|Final decision:|'
-        r'Evidence:|Failure evidence:|Blocked reason:|Backlog fail result:|'
+        r'Evidence:|Evidence directory:|Failure evidence:|Blocked reason:|Backlog fail result:|'
+        r'Proposal evidence:|Mutation evidence:|Verdict source:|Current allowed Files:|'
+        r'Original task:|Current Files:|Current Depends:|Current Verify:|Current Completion criteria:|'
+        r'Suggested child task count:|Suggested child task|Child \d+ Files:|Child \d+ Depends:|'
+        r'Child \d+ Verify:|Child \d+ Completion criteria:|'
+        r'Requested additional files:|Fail count unchanged:|Semantic backlog fields unchanged:|'
+        r'Recommended action:|'
         r'Rollback:|PASS commit:|PASS result:|Completed steps:|Result:|Reason:)',
         re.IGNORECASE,
     )

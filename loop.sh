@@ -2625,12 +2625,13 @@ def values_from(text):
     return [part.strip() for part in text.split(",") if part.strip()]
 
 for line in lines:
-    task_match = re.match(r"^\s*-\s+(Task \d+(?:\.\d+)+):\s*(.+?)\s*$", line)
+    task_match = re.match(r"^\s*(?:[-*]\s+(?:\[[ xX]\]\s*)?|#{3,}\s+)(Task \d+(?:\.\d+)*):\s*(.+?)\s*$", line, re.IGNORECASE)
     if task_match:
         current = {
             "id": task_match.group(1),
             "name": task_match.group(2).strip(),
             "files": [],
+            "depends": [],
             "verify": [],
             "completion_criteria": [],
         }
@@ -2641,13 +2642,17 @@ for line in lines:
     if current is None:
         continue
 
-    field_match = re.match(r"^\s+-\s+(Files|Verify|Completion criteria):\s*(.*)$", line, re.IGNORECASE)
+    field_match = re.match(r"^\s+[-*]\s+(File|Files|Depends|Verify|Completion criteria):\s*(.*)$", line, re.IGNORECASE)
     if field_match:
         field = field_match.group(1).lower()
         value = field_match.group(2).strip()
         current_field = field
-        if field == "files":
+        if field == "file":
             current["files"].extend(values_from(value))
+        elif field == "files":
+            current["files"].extend(values_from(value))
+        elif field == "depends":
+            current["depends"].extend(values_from(value))
         elif field == "verify":
             current["verify"].extend(values_from(value))
         elif field == "completion criteria" and value:
@@ -2667,8 +2672,9 @@ for child in children:
     for field in ("id", "name"):
         if not child.get(field):
             errors.append(f"missing {field}")
-    for field in ("files", "verify", "completion_criteria"):
+    for field in ("files", "depends", "verify", "completion_criteria"):
         child[field] = [value for value in child[field] if value]
+    for field in ("files", "verify", "completion_criteria"):
         if not child[field]:
             errors.append(f"{child.get('id', 'child')}: missing {field}")
 
@@ -2681,6 +2687,110 @@ with open(output_path, "w", encoding="utf-8") as f:
     json.dump(children, f, ensure_ascii=False, indent=2)
     f.write("\n")
 PY
+}
+
+render_current_task_metadata() {
+  local py_cmd
+  py_cmd="$(get_python_cmd)"
+  if [[ -z "$py_cmd" ]]; then
+    echo "Current Files: unavailable"
+    echo "Current Depends: unavailable"
+    echo "Current Verify: unavailable"
+    echo "Current Completion criteria: unavailable"
+    return 0
+  fi
+
+  BACKLOG_PATH="$BACKLOG" \
+  TASK_ID="$NEXT_TASK_ID" \
+  PYTHONUTF8=1 PYTHONIOENCODING=utf-8 \
+    $py_cmd - <<'PY'
+import os
+import re
+
+backlog = os.environ["BACKLOG_PATH"]
+task_id = os.environ["TASK_ID"]
+with open(backlog, "r", encoding="utf-8", errors="replace") as f:
+    lines = f.read().splitlines()
+
+start = None
+end = len(lines)
+task_re = re.compile(r"^-\s+\[[ xX!]\]\s+" + re.escape(task_id) + r":")
+next_task_re = re.compile(r"^-\s+\[[ xX!]\]\s+Task ")
+for i, line in enumerate(lines):
+    if task_re.match(line):
+        start = i
+        continue
+    if start is not None and i > start and next_task_re.match(line):
+        end = i
+        break
+
+block = lines[start:end] if start is not None else []
+fields = {"Files": "none", "Depends": "none", "Verify": "none"}
+criteria = []
+in_criteria = False
+for line in block:
+    match = re.match(r"^\s+-\s+(Files|Depends|Verify):\s*(.*?)\s*$", line)
+    if match:
+        fields[match.group(1)] = match.group(2).strip() or "none"
+        in_criteria = False
+        continue
+    match = re.match(r"^\s+-\s+Completion criteria:\s*(.*?)\s*$", line)
+    if match:
+        value = match.group(1).strip()
+        if value:
+            criteria.append(re.sub(r"^\[[ xX]\]\s*", "", value).strip())
+        in_criteria = True
+        continue
+    if in_criteria:
+        item = re.match(r"^\s+-\s+(?:\[[ xX]\]\s*)?(.+?)\s*$", line)
+        if item:
+            criteria.append(item.group(1).strip())
+        elif line and not line.startswith(" "):
+            in_criteria = False
+
+print(f"Current Files: {fields['Files']}")
+print(f"Current Depends: {fields['Depends']}")
+print(f"Current Verify: {fields['Verify']}")
+print("Current Completion criteria: " + ("; ".join(criteria) if criteria else "none"))
+PY
+}
+
+render_split_task_children() {
+  local specs_file="$1"
+  local guide="$2"
+  local fallback_guide
+  local py_cmd
+  py_cmd="$(get_python_cmd)"
+  if [[ -n "$py_cmd" && -f "$specs_file" ]]; then
+    PYTHONUTF8=1 PYTHONIOENCODING=utf-8 $py_cmd - "$specs_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as f:
+    specs = json.load(f)
+
+print(f"Suggested child task count: {len(specs)}")
+for index, child in enumerate(specs, 1):
+    prefix = f"Child {index}"
+    print(f"Suggested child task {index}: {child.get('id', '')} - {child.get('name', '')}".strip())
+    print(f"{prefix} Files: {', '.join(child.get('files') or ['none'])}")
+    print(f"{prefix} Depends: {', '.join(child.get('depends') or ['none'])}")
+    print(f"{prefix} Verify: {', '.join(child.get('verify') or ['none'])}")
+    print(f"{prefix} Completion criteria: {'; '.join(child.get('completion_criteria') or ['none'])}")
+PY
+    return 0
+  fi
+
+  fallback_guide="$guide"
+  if [[ -z "${fallback_guide//[[:space:]]/}" ]]; then
+    fallback_guide="No suggested child task descriptions were provided by Impl Critic."
+  fi
+  echo "Suggested child task count: unknown"
+  echo "Suggested child task 1: unparsed split guidance"
+  echo "Child 1 Files: unavailable"
+  echo "Child 1 Depends: unavailable"
+  echo "Child 1 Verify: unavailable"
+  echo "Child 1 Completion criteria: $fallback_guide"
 }
 
 dependency_task_ids_csv() {
@@ -3230,6 +3340,20 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
   if [[ "$BL_COMPLETE" == "true" ]]; then
     ok "All tasks complete! Backlog exhausted."
     run_backlog_manager progress "$BACKLOG" 2>/dev/null || true
+    {
+      echo ""
+      echo "=== Loop ${LOOP}: Backlog Complete ==="
+      echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "Result: SUCCESS"
+      echo "Reason: completed backlog"
+      echo "Final decision: PASS (backlog already complete)"
+      echo "Exit code: 0"
+      echo ""
+    } >> "$PROGRESS"
+    append_event "run_complete" \
+      "status=PASS" \
+      "reason=backlog_complete"
+    add_result "Loop ${LOOP}: SUCCESS (backlog complete)"
     break
   fi
 
@@ -3613,26 +3737,10 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     continue
   fi
   transaction_write "scope_check"
+  SCOPE_CHECK_FAILED=0
   if ! check_changed_files_scope; then
-    FAIL_RESULT="$(record_task_failure "Scope Check" "OUT_OF_SCOPE" "FAIL loop=$LOOP" "${EVIDENCE_REL}scope_check.txt" 2>/dev/null || echo "ERROR")"
-    if [[ "$FAIL_RESULT" == "BLOCKED" ]]; then
-      echo -e "${RED}  Task $NEXT_TASK_ID BLOCKED ($LOOP_MAX_ATTEMPTS consecutive failures)${RESET}"
-    fi
-
-    {
-      echo ""
-      echo "=== Loop ${LOOP}: Scope Check FAIL ==="
-      echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
-      echo "Task: $NEXT_TASK_ID — $NEXT_TASK_NAME"
-      cat "$EVIDENCE_DIR/scope_check.txt"
-      echo "Evidence: $EVIDENCE_REL"
-      echo "Out of scope file: ${EVIDENCE_REL}out_of_scope.txt"
-      echo "Backlog fail result: $FAIL_RESULT"
-      echo "Final decision: FAIL (scope check overrides Impl Critic verdict)"
-      echo ""
-    } >> "$PROGRESS"
-
-    phase "Phase 4 · Impl Critic"
+    SCOPE_CHECK_FAILED=1
+    phase "Phase 4 - Impl Critic"
     transaction_write "impl_critic"
     snapshot_state_files "Impl Critic" "$IMPL_CRITIQUE"
     render "$AGENTS_DIR/impl_critic.md" "$STATE_DIR/impl_critic_rendered.md"
@@ -3650,6 +3758,20 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       transaction_complete "FAIL"
       continue
     fi
+    IMPL_VERDICT="$(check_verdict "$IMPL_CRITIQUE")"
+    if [[ "$IMPL_VERDICT" == "MALFORMED" ]] && grep -q '^VERDICT: SCOPE_EXPAND' "$IMPL_CRITIQUE" 2>/dev/null; then
+      IMPL_VERDICT="SCOPE_EXPAND"
+    elif [[ "$IMPL_VERDICT" == "MALFORMED" ]] && grep -q '^VERDICT: SPLIT_TASK' "$IMPL_CRITIQUE" 2>/dev/null; then
+      IMPL_VERDICT="SPLIT_TASK"
+    fi
+    info "Implementation verdict: $IMPL_VERDICT"
+    if [[ "$IMPL_VERDICT" == "SCOPE_EXPAND" || "$IMPL_VERDICT" == "SPLIT_TASK" ]]; then
+      echo -e "${YELLOW}  Scope check deferred to ${IMPL_VERDICT} policy${RESET}"
+    else
+      FAIL_RESULT="$(record_task_failure "Scope Check" "OUT_OF_SCOPE" "FAIL loop=$LOOP" "${EVIDENCE_REL}scope_check.txt" 2>/dev/null || echo "ERROR")"
+      if [[ "$FAIL_RESULT" == "BLOCKED" ]]; then
+        echo -e "${RED}  Task $NEXT_TASK_ID BLOCKED ($LOOP_MAX_ATTEMPTS consecutive failures)${RESET}"
+      fi
     git_rollback "scope check failure — discard partial implementation"
     {
       echo ""
@@ -3668,8 +3790,10 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     add_result "Loop ${LOOP}: FAIL (scope check) — $NEXT_TASK_ID"
     transaction_complete "FAIL"
     continue
+    fi
   fi
 
+  if [[ "$SCOPE_CHECK_FAILED" != "1" ]]; then
   VERIFY_RESULT=0
   VERIFY_STATUS="PASS"
   transaction_write "verify"
@@ -3730,9 +3854,15 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
   fi
 
   IMPL_VERDICT="$(check_verdict "$IMPL_CRITIQUE")"
+  if [[ "$IMPL_VERDICT" == "MALFORMED" ]] && grep -q '^VERDICT: SCOPE_EXPAND' "$IMPL_CRITIQUE" 2>/dev/null; then
+    IMPL_VERDICT="SCOPE_EXPAND"
+  elif [[ "$IMPL_VERDICT" == "MALFORMED" ]] && grep -q '^VERDICT: SPLIT_TASK' "$IMPL_CRITIQUE" 2>/dev/null; then
+    IMPL_VERDICT="SPLIT_TASK"
+  fi
   info "Implementation verdict: $IMPL_VERDICT"
+  fi
 
-  if decision_is_invalid_verdict "$IMPL_VERDICT"; then
+  if decision_is_invalid_verdict "$IMPL_VERDICT" && [[ "$IMPL_VERDICT" != "SPLIT_TASK" ]]; then
     echo -e "${YELLOW}  Impl Critic verdict invalid -> rollback + record failure -> next loop${RESET}"
     FAIL_RESULT="$(record_task_failure "Impl Critic" "$IMPL_VERDICT" "invalid verdict loop=$LOOP" ".loop-agent/impl_critique.md" 2>/dev/null || echo "ERROR")"
     git_rollback "Impl Critic invalid verdict - discard partial implementation"
@@ -3906,11 +4036,13 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     echo -e "${YELLOW}  Split proposal requested${RESET}"
     SPLIT_GUIDE="$(awk '
       BEGIN{f=0}
-      /^## Split task/ {f=1; next}
+      tolower($0) ~ /^## split task/ || tolower($0) ~ /^## suggested child tasks/ || tolower($0) ~ /^## suggested tasks/ {f=1; next}
       f && /^## / {exit}
       f {print}
     ' "$IMPL_CRITIQUE" | tr -d '\r')"
-    git_rollback "SPLIT_TASK - discard partial implementation"
+    if [[ -z "$SPLIT_GUIDE" ]]; then
+      SPLIT_GUIDE="$(tr -d '\r' < "$IMPL_CRITIQUE")"
+    fi
     PROPOSALS_DIR="$STATE_DIR/proposals"
     mkdir -p "$PROPOSALS_DIR"
     SAFE_TASK_ID="${NEXT_TASK_ID//[^A-Za-z0-9_.-]/_}"
@@ -3921,81 +4053,38 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     SPLIT_TASK_EVIDENCE_FILE="$EVIDENCE_DIR/split_task_mutation.md"
     SPLIT_TASK_LINT_OUTPUT=""
     SPLIT_TASK_EVENT_OUTCOME="rejected"
-    SPLIT_TASK_REASON="LOOP_ALLOW_AUTO_TASK_SPLIT is not 1"
-    SPLIT_TASK_CAN_MUTATE=0
+    SPLIT_TASK_REASON="split task requires review before backlog task list changes"
     printf '%s\n' "$SPLIT_GUIDE" > "$SPLIT_GUIDE_FILE"
+    if ! SPLIT_TASK_LINT_OUTPUT="$(parse_split_task_specs "$SPLIT_GUIDE_FILE" "$SPLIT_SPECS_FILE" 2>&1)"; then
+      rm -f "$SPLIT_SPECS_FILE"
+    fi
+    SPLIT_TASK_CURRENT_METADATA="$(render_current_task_metadata)"
+    SPLIT_TASK_CHILD_DETAILS="$(render_split_task_children "$SPLIT_SPECS_FILE" "$SPLIT_GUIDE")"
+    SPLIT_TASK_CHILD_IDS="$(split_task_ids_csv "$SPLIT_SPECS_FILE")"
+    [[ -n "$SPLIT_TASK_CHILD_IDS" ]] || SPLIT_TASK_CHILD_IDS="$NEXT_TASK_ID"
+    SPLIT_TASK_CHILD_COUNT="unknown"
+    if [[ -f "$SPLIT_SPECS_FILE" ]]; then
+      SPLIT_TASK_COUNT_PY="$(get_python_cmd)"
+      if [[ -n "$SPLIT_TASK_COUNT_PY" ]]; then
+        SPLIT_TASK_CHILD_COUNT="$(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 $SPLIT_TASK_COUNT_PY - "$SPLIT_SPECS_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as f:
+    print(len(json.load(f)))
+PY
+)"
+      fi
+    fi
+    [[ -n "$SPLIT_TASK_CHILD_COUNT" ]] || SPLIT_TASK_CHILD_COUNT="unknown"
 
     append_event "mutation" \
       "mutation_type=task_split" \
       "outcome=attempted" \
       "status=attempted" \
       "reason=impl_critic_split_task" \
-      "affected_paths=$NEXT_TASK_ID" \
+      "affected_paths=$SPLIT_TASK_CHILD_IDS" \
       "evidence_location=${EVIDENCE_REL}split_task_mutation.md"
-
-    if [[ "${LOOP_ALLOW_AUTO_TASK_SPLIT:-}" == "1" ]]; then
-      if ! SPLIT_PARSE_OUTPUT="$(parse_split_task_specs "$SPLIT_GUIDE_FILE" "$SPLIT_SPECS_FILE" 2>&1)"; then
-        SPLIT_TASK_REASON="invalid split guidance: $SPLIT_PARSE_OUTPUT"
-        SPLIT_TASK_EVENT_OUTCOME="rejected"
-      else
-        SPLIT_TASK_CAN_MUTATE=1
-        SPLIT_TASK_REASON="accepted"
-        SPLIT_TASK_EVENT_OUTCOME="accepted"
-      fi
-    fi
-
-    if [[ "$SPLIT_TASK_CAN_MUTATE" == "1" ]]; then
-      BACKLOG_SPLIT_BACKUP="$EVIDENCE_DIR/backlog_before_split_task.md"
-      cp "$BACKLOG" "$BACKLOG_SPLIT_BACKUP"
-      if ! SPLIT_TASK_MUTATE_OUTPUT="$(run_backlog_manager split "$BACKLOG" "$NEXT_TASK_ID" "$SPLIT_SPECS_FILE" "Task replaced by accepted split." "$IMPL_VERDICT" "$EVIDENCE_REL" 2>&1)"; then
-        cp "$BACKLOG_SPLIT_BACKUP" "$BACKLOG"
-        SPLIT_TASK_REASON="backlog split failed: $SPLIT_TASK_MUTATE_OUTPUT"
-        SPLIT_TASK_EVENT_OUTCOME="blocked"
-        SPLIT_TASK_CAN_MUTATE=0
-      elif ! SPLIT_TASK_LINT_OUTPUT="$(run_backlog_manager lint "$BACKLOG" 2>&1)"; then
-        cp "$BACKLOG_SPLIT_BACKUP" "$BACKLOG"
-        SPLIT_TASK_REASON="backlog lint failed"
-        SPLIT_TASK_EVENT_OUTCOME="blocked"
-        SPLIT_TASK_CAN_MUTATE=0
-      else
-        write_split_task_mutation_evidence "$SPLIT_TASK_EVIDENCE_FILE" "$SPLIT_TASK_EVENT_OUTCOME" "$SPLIT_TASK_REASON"
-        append_event "mutation" \
-          "mutation_type=task_split" \
-          "outcome=accepted" \
-          "status=accepted" \
-          "reason=$SPLIT_TASK_REASON" \
-          "affected_paths=$(split_task_ids_csv "$SPLIT_SPECS_FILE")" \
-          "evidence_location=${EVIDENCE_REL}split_task_mutation.md"
-        {
-          echo ""
-          echo "=== Loop ${LOOP}: Split Task Accepted ==="
-          echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
-          echo "Task: $NEXT_TASK_ID - $NEXT_TASK_NAME"
-          echo "Evidence: $EVIDENCE_REL"
-          echo "Mutation evidence: ${EVIDENCE_REL}split_task_mutation.md"
-          echo "Child tasks: $(split_task_ids_csv "$SPLIT_SPECS_FILE")"
-          echo "Backlog lint: passed"
-          echo "Rollback: implementation changes discarded"
-          echo "PASS commit: skipped"
-          echo ""
-        } >> "$PROGRESS"
-        {
-          echo "### SPLIT_TASK accepted"
-          echo ""
-          echo "- Evidence: ${EVIDENCE_REL}"
-          echo "- Mutation evidence: ${EVIDENCE_REL}split_task_mutation.md"
-          echo "- Child tasks: $(split_task_ids_csv "$SPLIT_SPECS_FILE")"
-          echo "- Backlog lint: passed"
-          echo "- Rollback: implementation changes discarded"
-          echo "- PASS commit: skipped"
-          echo ""
-        } >> "$REPORT"
-        ok "split task accepted: $(split_task_ids_csv "$SPLIT_SPECS_FILE")"
-        add_result "Loop ${LOOP}: SPLIT_TASK accepted - $NEXT_TASK_ID"
-        transaction_complete "SPLIT_TASK"
-        continue
-      fi
-    fi
 
     write_split_task_mutation_evidence "$SPLIT_TASK_EVIDENCE_FILE" "$SPLIT_TASK_EVENT_OUTCOME" "$SPLIT_TASK_REASON"
     append_event "mutation" \
@@ -4019,6 +4108,9 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       echo ""
       echo "No backlog task list, Files, Depends, verify command, or completion criteria change was applied."
       echo ""
+      echo "## Current task metadata"
+      printf '%s\n' "$SPLIT_TASK_CURRENT_METADATA"
+      echo ""
       echo "## Reason and split guidance"
       if [[ -n "$SPLIT_GUIDE" ]]; then
         echo "$SPLIT_GUIDE"
@@ -4027,11 +4119,7 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       fi
       echo ""
       echo "## Suggested child tasks"
-      if [[ -n "$SPLIT_GUIDE" ]]; then
-        echo "$SPLIT_GUIDE"
-      else
-        echo "No suggested child task descriptions were provided by Impl Critic."
-      fi
+      printf '%s\n' "$SPLIT_TASK_CHILD_DETAILS"
       echo ""
       echo "## Mutation outcome"
       echo "$SPLIT_TASK_EVENT_OUTCOME"
@@ -4056,6 +4144,9 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
         echo "impl_critique.md was not found."
       fi
     } > "$PROPOSAL_EVIDENCE_FILE"
+    BLOCK_REASON="Split task proposal requires review before more implementation."
+    BLOCK_RESULT="$(run_backlog_manager block "$BACKLOG" "$NEXT_TASK_ID" "$BLOCK_REASON" "$IMPL_VERDICT" "$EVIDENCE_REL" 2>/dev/null || echo "ERROR")"
+    git_rollback "SPLIT_TASK - discard partial implementation"
     {
       echo ""
       echo "=== Loop ${LOOP}: Split Task Proposal ==="
@@ -4067,6 +4158,15 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       echo "Mutation evidence: ${EVIDENCE_REL}split_task_mutation.md"
       echo "Mutation outcome: $SPLIT_TASK_EVENT_OUTCOME"
       echo "Mutation reason: $SPLIT_TASK_REASON"
+      echo "Original task: $NEXT_TASK_ID - $NEXT_TASK_NAME"
+      echo "Blocked reason: $BLOCK_REASON"
+      echo "Verdict source: Impl Critic SPLIT_TASK"
+      printf '%s\n' "$SPLIT_TASK_CURRENT_METADATA"
+      printf '%s\n' "$SPLIT_TASK_CHILD_DETAILS"
+      echo "Backlog block result: $BLOCK_RESULT"
+      echo "Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
+      echo "Semantic backlog fields unchanged: Files, Depends, verify command, and completion criteria"
+      echo "Recommended action: Review the split proposal and manually replace the blocked task with child tasks if appropriate."
       echo "Rollback: implementation changes discarded"
       echo "No backlog task list, Files, Depends, verify command, or completion criteria change was applied."
       echo "PASS commit: skipped"
@@ -4074,6 +4174,15 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     } >> "$PROGRESS"
     append_shell_report "BLOCKED" "Impl Critic SPLIT_TASK"
     {
+      echo "### BLOCKED: SPLIT_TASK"
+      echo ""
+      echo "- Reason: $BLOCK_REASON"
+      echo "- Original task: $NEXT_TASK_ID - $NEXT_TASK_NAME"
+      echo "- Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
+      echo "- Suggested child task count: $SPLIT_TASK_CHILD_COUNT"
+      echo "- Action required: Review the split proposal and manually replace the blocked task with child tasks if appropriate."
+      echo "- Recommended action: Review the split proposal and manually replace the blocked task with child tasks if appropriate."
+      echo ""
       echo "### SPLIT_TASK proposal lifecycle"
       echo ""
       echo "- Evidence: ${EVIDENCE_REL}"
@@ -4082,12 +4191,27 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       echo "- Mutation outcome: $SPLIT_TASK_EVENT_OUTCOME"
       echo "- Mutation reason: $SPLIT_TASK_REASON"
       echo "- Proposal: $PROPOSAL_FILE"
+      echo "- Blocked reason: $BLOCK_REASON"
+      echo "- Backlog block result: $BLOCK_RESULT"
       echo "- Rollback: implementation changes discarded"
       echo "- PASS commit: skipped"
       echo ""
     } >> "$REPORT"
     ok "split task proposal written: $PROPOSAL_FILE"
+    warn "BLOCKED (SPLIT_TASK): $BLOCK_REASON"
+    echo "  BLOCKED: SPLIT_TASK"
+    echo "  Action required: Review the split proposal and manually replace the blocked task with child tasks if appropriate."
+    echo "  Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
     add_result "Loop ${LOOP}: SPLIT_TASK proposal - $NEXT_TASK_ID"
+    append_event "blocked" \
+      "outcome=BLOCKED" \
+      "status=BLOCKED" \
+      "task_id=$NEXT_TASK_ID" \
+      "block_type=SPLIT_TASK" \
+      "reason=$BLOCK_REASON" \
+      "recommended_action=Review the split proposal and manually replace the blocked task with child tasks if appropriate." \
+      "suggested_child_task_count=$SPLIT_TASK_CHILD_COUNT" \
+      "fail_count_unchanged=true"
     transaction_complete "SPLIT_TASK"
     continue
   fi
@@ -4283,23 +4407,28 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
 
   if [[ "$IMPL_VERDICT" == "SCOPE_EXPAND" ]]; then
     echo -e "${YELLOW}  Scope expansion requested${RESET}"
-    git_rollback "SCOPE_EXPAND - discard partial implementation"
 
     EXPAND_ITEMS="$(awk '
       BEGIN{f=0}
-      /^## Scope expansion needed/ {f=1; next}
+      /^## Scope expansion needed/ || /^## Requested files/ || /^## Additional files needed/ {f=1; next}
       f && /^## / {exit}
-      f && /^- `/ {print}
+      f && /^- / {print}
     ' "$IMPL_CRITIQUE" | tr -d '\r')"
 
     EXPAND_RAW="$(awk '
       BEGIN{f=0}
-      /^## Scope expansion needed/ {f=1; next}
+      /^## Scope expansion needed/ || /^## Requested files/ || /^## Additional files needed/ {f=1; next}
       f && /^## / {exit}
-      f && /^- `[^`]+`/ {
-        match($0, /`[^`]+`/)
-        if (RSTART > 0) {
+      f && /^- / {
+        if (match($0, /`[^`]+`/)) {
           path = substr($0, RSTART+1, RLENGTH-2)
+          print path
+          next
+        }
+        path = $0
+        sub(/^- /, "", path)
+        sub(/[[:space:]].*$/, "", path)
+        if (path != "") {
           print path
         }
       }
@@ -4312,8 +4441,14 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     SCOPE_EXPAND_LINT_OUTPUT=""
     SCOPE_EXPAND_EVIDENCE_FILE="$EVIDENCE_DIR/scope_expand_mutation.md"
     SCOPE_EXPAND_EVENT_OUTCOME="rejected"
-    SCOPE_EXPAND_REASON="LOOP_ALLOW_AUTO_SCOPE_EXPAND is not 1"
-    SCOPE_EXPAND_CAN_MUTATE=0
+    SCOPE_EXPAND_REASON="scope expansion requires review before backlog Files change"
+    SCOPE_EXPAND_ALLOWED_FILES="none"
+    if SCOPE_EXPAND_ALLOWED_RAW="$(run_backlog_manager files "$BACKLOG" "$NEXT_TASK_ID" 2>/dev/null)"; then
+      SCOPE_EXPAND_ALLOWED_FILES="$(printf '%s\n' "$SCOPE_EXPAND_ALLOWED_RAW" | awk 'NF { printf "%s`%s`", sep, $0; sep=", " } END { if (sep == "") print "none"; else print "" }')"
+    else
+      SCOPE_EXPAND_ALLOWED_FILES="unavailable"
+    fi
+    SCOPE_EXPAND_REQUESTED_FILES="$(printf '%s\n' "$EXPAND_RAW" | awk 'NF { printf "%s`%s`", sep, $0; sep=", " } END { if (sep == "") print "none"; else print "" }')"
     mapfile -t EXPAND_REQUESTED <<< "$EXPAND_RAW"
 
     append_event "mutation" \
@@ -4333,89 +4468,11 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       fi
     done <<< "$EXPAND_RAW"
 
-    if [[ "${LOOP_ALLOW_AUTO_SCOPE_EXPAND:-}" == "1" ]]; then
-      EXISTING_SCOPE_FILES=()
-      if mapfile -t EXISTING_SCOPE_FILES < <(run_backlog_manager files "$BACKLOG" "$NEXT_TASK_ID" 2>/dev/null); then
-        for path in "${EXPAND_VALID[@]}"; do
-          if path_in_list "$path" "${EXISTING_SCOPE_FILES[@]}" || path_in_list "$path" "${EXPAND_ACCEPTED[@]}"; then
-            EXPAND_REJECTED+=("$path (already in Files)")
-          else
-            EXPAND_ACCEPTED+=("$path")
-          fi
-        done
-        if [[ ${#EXPAND_ACCEPTED[@]} -gt 3 ]]; then
-          SCOPE_EXPAND_REASON="max 3 added files exceeded"
-          SCOPE_EXPAND_EVENT_OUTCOME="rejected"
-        elif [[ ${#EXPAND_ACCEPTED[@]} -eq 0 ]]; then
-          SCOPE_EXPAND_REASON="no valid new files requested"
-          SCOPE_EXPAND_EVENT_OUTCOME="rejected"
-        else
-          SCOPE_EXPAND_CAN_MUTATE=1
-          SCOPE_EXPAND_REASON="accepted"
-          SCOPE_EXPAND_EVENT_OUTCOME="accepted"
-        fi
-      else
-        SCOPE_EXPAND_REASON="could not read current task Files"
-        SCOPE_EXPAND_EVENT_OUTCOME="blocked"
-      fi
-    fi
-
     PROPOSALS_DIR="$STATE_DIR/proposals"
     mkdir -p "$PROPOSALS_DIR"
     SAFE_TASK_ID="${NEXT_TASK_ID//[^A-Za-z0-9_.-]/_}"
     PROPOSAL_FILE="$PROPOSALS_DIR/scope_expand_loop_${LOOP}_${SAFE_TASK_ID}.md"
     PROPOSAL_EVIDENCE_FILE="$EVIDENCE_DIR/proposal_verdict.md"
-
-    if [[ "$SCOPE_EXPAND_CAN_MUTATE" == "1" ]]; then
-      BACKLOG_SCOPE_EXPAND_BACKUP="$EVIDENCE_DIR/backlog_before_scope_expand.md"
-      cp "$BACKLOG" "$BACKLOG_SCOPE_EXPAND_BACKUP"
-      if ! SCOPE_EXPAND_MUTATE_OUTPUT="$(scope_expand_append_backlog_files "${EXPAND_ACCEPTED[@]}" 2>&1)"; then
-        cp "$BACKLOG_SCOPE_EXPAND_BACKUP" "$BACKLOG"
-        SCOPE_EXPAND_REASON="backlog Files update failed: $SCOPE_EXPAND_MUTATE_OUTPUT"
-        SCOPE_EXPAND_EVENT_OUTCOME="blocked"
-      elif ! SCOPE_EXPAND_LINT_OUTPUT="$(run_backlog_manager lint "$BACKLOG" 2>&1)"; then
-        cp "$BACKLOG_SCOPE_EXPAND_BACKUP" "$BACKLOG"
-        SCOPE_EXPAND_REASON="backlog lint failed"
-        SCOPE_EXPAND_EVENT_OUTCOME="blocked"
-      else
-        write_scope_expand_mutation_evidence "$SCOPE_EXPAND_EVIDENCE_FILE" "$SCOPE_EXPAND_EVENT_OUTCOME" "$SCOPE_EXPAND_REASON"
-        append_event "mutation" \
-          "mutation_type=scope_expand" \
-          "outcome=accepted" \
-          "status=accepted" \
-          "reason=$SCOPE_EXPAND_REASON" \
-          "affected_paths=$(scope_expand_paths_csv "${EXPAND_ACCEPTED[@]}")" \
-          "evidence_location=${EVIDENCE_REL}scope_expand_mutation.md"
-        {
-          echo ""
-          echo "=== Loop ${LOOP}: Scope Expand Accepted ==="
-          echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
-          echo "Task: $NEXT_TASK_ID - $NEXT_TASK_NAME"
-          echo "Evidence: $EVIDENCE_REL"
-          echo "Mutation evidence: ${EVIDENCE_REL}scope_expand_mutation.md"
-          echo "Added files: $(scope_expand_paths_csv "${EXPAND_ACCEPTED[@]}")"
-          echo "Backlog lint: passed"
-          echo "Rollback: implementation changes discarded"
-          echo "PASS commit: skipped"
-          echo ""
-        } >> "$PROGRESS"
-        {
-          echo "### SCOPE_EXPAND accepted"
-          echo ""
-          echo "- Evidence: ${EVIDENCE_REL}"
-          echo "- Mutation evidence: ${EVIDENCE_REL}scope_expand_mutation.md"
-          echo "- Added files: $(scope_expand_paths_csv "${EXPAND_ACCEPTED[@]}")"
-          echo "- Backlog lint: passed"
-          echo "- Rollback: implementation changes discarded"
-          echo "- PASS commit: skipped"
-          echo ""
-        } >> "$REPORT"
-        ok "scope expansion accepted: $(scope_expand_paths_csv "${EXPAND_ACCEPTED[@]}")"
-        add_result "Loop ${LOOP}: SCOPE_EXPAND accepted - $NEXT_TASK_ID"
-        transaction_complete "SCOPE_EXPAND"
-        continue
-      fi
-    fi
 
     if [[ ${#EXPAND_REJECTED[@]} -gt 0 ]]; then
       warn "SCOPE_EXPAND rejected ${#EXPAND_REJECTED[@]} item(s):"
@@ -4490,6 +4547,7 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       fi
     } > "$PROPOSAL_EVIDENCE_FILE"
     BLOCK_RESULT="$(run_backlog_manager block "$BACKLOG" "$NEXT_TASK_ID" "$BLOCK_REASON" "$IMPL_VERDICT" "$EVIDENCE_REL" 2>/dev/null || echo "ERROR")"
+    git_rollback "SCOPE_EXPAND - discard partial implementation"
     {
       echo ""
       echo "=== Loop ${LOOP}: Scope Expand Proposal ==="
@@ -4497,12 +4555,19 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       echo "Task: $NEXT_TASK_ID - $NEXT_TASK_NAME"
       echo "Proposal: $PROPOSAL_FILE"
       echo "Evidence: $EVIDENCE_REL"
+      echo "Evidence directory: $EVIDENCE_REL"
       echo "Proposal evidence: ${EVIDENCE_REL}proposal_verdict.md"
       echo "Mutation evidence: ${EVIDENCE_REL}scope_expand_mutation.md"
       echo "Mutation outcome: $SCOPE_EXPAND_EVENT_OUTCOME"
       echo "Mutation reason: $SCOPE_EXPAND_REASON"
       echo "Blocked reason: $BLOCK_REASON"
+      echo "Verdict source: Impl Critic SCOPE_EXPAND"
+      echo "Current allowed Files: $SCOPE_EXPAND_ALLOWED_FILES"
+      echo "Requested additional files: $SCOPE_EXPAND_REQUESTED_FILES"
       echo "Backlog block result: $BLOCK_RESULT"
+      echo "Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
+      echo "Semantic backlog fields unchanged: Files, Depends, verify command, and completion criteria"
+      echo "Recommended action: Review the scope expansion proposal and manually update backlog.md Files if appropriate."
       echo "Rollback: implementation changes discarded"
       echo "No backlog Files, Depends, verify command, or completion criteria change was applied."
       echo "PASS commit: skipped"
@@ -4510,6 +4575,14 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
     } >> "$PROGRESS"
     append_shell_report "BLOCKED" "Impl Critic SCOPE_EXPAND"
     {
+      echo "### BLOCKED: SCOPE_EXPAND"
+      echo ""
+      echo "- Reason: $BLOCK_REASON"
+      echo "- Requested files: $SCOPE_EXPAND_REQUESTED_FILES"
+      echo "- Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
+      echo "- Action required: Review the scope expansion proposal and manually update backlog.md Files if appropriate."
+      echo "- Recommended action: Review the scope expansion proposal and manually update backlog.md Files if appropriate."
+      echo ""
       echo "### SCOPE_EXPAND proposal lifecycle"
       echo ""
       echo "- Evidence: ${EVIDENCE_REL}"
@@ -4525,7 +4598,19 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       echo ""
     } >> "$REPORT"
     ok "scope expansion proposal written: $PROPOSAL_FILE"
+    warn "BLOCKED (SCOPE_EXPAND): $BLOCK_REASON"
+    echo "  BLOCKED: SCOPE_EXPAND"
+    echo "  Action required: Review the scope expansion proposal and manually update backlog.md Files if appropriate."
+    echo "  Fail count unchanged: ${TASK_FAIL_COUNT:-0}"
     add_result "Loop ${LOOP}: SCOPE_EXPAND proposal - $NEXT_TASK_ID"
+    append_event "blocked" \
+      "outcome=BLOCKED" \
+      "status=BLOCKED" \
+      "block_type=SCOPE_EXPAND" \
+      "reason=$BLOCK_REASON" \
+      "recommended_action=Review the scope expansion proposal and manually update backlog.md Files if appropriate." \
+      "requested_files=$(scope_expand_paths_csv "${EXPAND_REQUESTED[@]}")" \
+      "fail_count_unchanged=true"
     transaction_complete "SCOPE_EXPAND"
     continue
   fi
@@ -4547,12 +4632,12 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
       fi
     } > "$FAIL_EVIDENCE_FILE"
 
-    echo -e "${YELLOW}  Implementation FAIL → rollback + record in progress.txt → next loop${RESET}"
+    echo -e "${YELLOW}  Implementation FAIL -> rollback + increment Fail count -> next loop${RESET}"
     # Increment backlog fail count first.
     # Note: git_rollback preserves .loop-agent/, so call order does not strictly matter,
     # but incrementing state metadata (fail_count) before git ops is done for consistency.
     FAIL_RESULT="$(record_task_failure "Impl Critic" "$IMPL_VERDICT" "FAIL loop=$LOOP" "${EVIDENCE_REL}impl_fail_reason.md" 2>/dev/null || echo "ERROR")"
-    git_rollback "Impl Critic FAIL → discard partial implementation"  # restore to pre-Implementer state
+    git_rollback "Impl Critic FAIL - discard partial implementation"  # restore to pre-Implementer state
     if [[ "$FAIL_RESULT" == "BLOCKED" ]]; then
       echo -e "${RED}  Task $NEXT_TASK_ID BLOCKED ($LOOP_MAX_ATTEMPTS consecutive failures)${RESET}"
     fi
@@ -4764,7 +4849,8 @@ BL_PENDING="$(echo "$BL_STATUS" | grep -o '"pending":[^,}]*' | cut -d: -f2 | tr 
 BL_COMPLETE="$(echo "$BL_STATUS" | grep -o '"complete":[^,}]*' | cut -d: -f2 | tr -d ' "' || echo false)"
 
 if [[ "$BL_COMPLETE" == "true" ]]; then
-  echo -e "${GREEN}${BOLD}🎉 All tasks complete! Project implementation finished.${RESET}"
+  echo -e "${GREEN}${BOLD}All tasks complete. Project implementation finished successfully.${RESET}"
+  echo "Completed backlog: SUCCESS (exit code 0)."
   echo ""
 elif [[ "$BL_PENDING" != "0" ]]; then
   echo -e "${YELLOW}${MAX_LOOPS} loops exhausted but tasks remain.${RESET}"
@@ -4778,7 +4864,7 @@ for r in "${RESULTS[@]}"; do
   [[ "$r" == *": PASS"* ]] && (( PASS_COUNT++ )) || true
 done
 
-if [[ "$PASS_COUNT" -eq 0 ]]; then
+if [[ "$PASS_COUNT" -eq 0 && "$BL_COMPLETE" != "true" ]]; then
   echo -e "${YELLOW}All ${MAX_LOOPS} loops exhausted with no PASS.${RESET}"
   echo "Review progress.txt and backlog.md."
   echo "  cat $PROGRESS"

@@ -48,6 +48,7 @@ mkdir -p .loop-agent
 - **Small**: 1 file, < 50 lines, clear scope
 - **Medium**: 1–3 files, moderate complexity
 - **Large**: **not allowed** — must be split into Small/Medium tasks before writing
+- Split oversized work while authoring the backlog. In run mode, `SPLIT_TASK` is only a proposal/block signal after discovery; it requires human backlog maintenance before retry and does not insert child tasks automatically.
 
 ---
 
@@ -109,6 +110,10 @@ mkdir -p .loop-agent
 (tasks already done based on existing code)
 - [x] Task 0.1: (description)
 ```
+
+## Backlog maintenance
+
+During compaction, completed task bodies move to `backlog_archive.md`. Active `backlog.md` retains pending `[ ]` and blocked `[!]` tasks, and should not retain empty repeated `## Tasks` headings or other empty task headings after completed tasks are archived.
 
 ---
 

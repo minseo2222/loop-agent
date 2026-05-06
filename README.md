@@ -147,6 +147,12 @@ FAIL → git rollback + failure count +1 (5 failures → BLOCKED)
 | **Rate limit reached** | Safe exit + auto rollback | **2** |
 | Ctrl+C | State files auto-restored | 130 |
 
+Completed backlog is a successful terminal state: when there is no pending work, loop-agent reports success and exits 0 even if no task ran in that invocation.
+
+Ordinary `FAIL` is reserved for implementation, review, verify, scope-gate, or no-change failures that roll back work and increment `Fail count`. `SCOPE_EXPAND` and `SPLIT_TASK` are blocked policy outcomes, not ordinary failures. They create review proposals, block the active task, report the reason and action required, and leave `Fail count` unchanged.
+
+Explicit `run` mode does not automatically modify semantic backlog fields for these outcomes. `SCOPE_EXPAND` blocks without incrementing `Fail count`; it records a proposal instead of editing `Files`, `Depends`, verify commands, completion criteria, description, or ordering constraints. `SPLIT_TASK` also blocks without incrementing `Fail count`; it records a split proposal instead of inserting child tasks or rewriting backlog structure. A human must review the proposal and intentionally edit or leave the backlog blocked before the task is retried.
+
 ---
 
 ## Prerequisites
@@ -296,10 +302,16 @@ Run the happy-path E2E test:
 bash tests/e2e_pass_fake_cli.sh
 ```
 
+Run the archive compaction regression after changes to backlog archive compaction, cleanup, or lint behavior:
+
+```bash
+bash tests/e2e_archive_compaction_fake_cli.sh
+```
+
 Run the CI-equivalent local checks:
 
 ```bash
-bash -n loop.sh run.sh && python -m py_compile backlog_manager.py progress_window.py && bash tests/e2e_pass_fake_cli.sh && bash tests/e2e_rate_limit_fake_cli.sh
+bash -n loop.sh run.sh && python -m py_compile backlog_manager.py progress_window.py && bash tests/e2e_pass_fake_cli.sh && bash tests/e2e_rate_limit_fake_cli.sh && bash tests/e2e_archive_compaction_fake_cli.sh
 ```
 
 The fake CLI is for deterministic testing only, not production use.
@@ -320,6 +332,10 @@ The backlog is the single source of truth for what loop-agent builds. Four files
 | [`agents/setup_agent.md`](agents/setup_agent.md) | Prompt that drives the Setup Agent. Reads your planning docs and generates `.loop-agent/backlog.md` automatically. |
 | [`agents/setup_critic.md`](agents/setup_critic.md) | Prompt that drives the Setup Critic. Validates the generated backlog and requests a retry if quality checks fail. |
 | [`TASK_PLANNING_FAILURE_PATTERNS.md`](TASK_PLANNING_FAILURE_PATTERNS.md) | Living document of recurring failure patterns. Both Setup Agent and Setup Critic reference this when generating and validating backlogs. |
+
+### Backlog task markers
+
+Backlog tasks use `[ ]` for pending work, `[x]` for completed work, and `[!]` for blocked work that needs manual action. During archive compaction, completed task bodies move out of the active backlog, and active `backlog.md` should not retain empty repeated `## Tasks` headings or other empty task headings after completed work is archived.
 
 ### Markdown backlog lint contract
 
@@ -463,6 +479,10 @@ Run mode preserves task meaning by refusing automatic edits to scope, `Files`, `
 
 Semantic backlog mutation is disabled by default, and mutation verdicts are proposal-only by default. `SCOPE_EXPAND` and `SPLIT_TASK` recommendations create standardized proposal files for review; they do not automatically expand scope, split tasks, insert dependencies, or apply backlog semantic changes by default. Deeper rules are documented in [`docs/design_invariants.md`](docs/design_invariants.md).
 
+`SCOPE_EXPAND` is proposal-only in normal `run` mode. It blocks the active task and records the requested scope change for review, but it does not mutate semantic fields such as `Files`, `Depends`, verify commands, completion criteria, or description, and it does not increment `Fail count`. A human must intentionally update the backlog scope or dependencies before retrying the task.
+
+`SPLIT_TASK` is also proposal-only in normal `run` mode. It is used when the active task is too broad or discovery shows that ordered child tasks are needed. The loop blocks the active task for human review, does not increment `Fail count`, and does not automatically split the task, insert child tasks, rewrite dependencies, or otherwise change backlog structure. A human must edit the backlog intentionally before retrying.
+
 Future automatic scope expansion, task splitting, or dependency insertion remains disabled by default and is governed by [`docs/backlog_mutation_policy.md`](docs/backlog_mutation_policy.md). The experimental flags `LOOP_ALLOW_AUTO_SCOPE_EXPAND=1`, `LOOP_ALLOW_AUTO_TASK_SPLIT=1`, and `LOOP_ALLOW_AUTO_DEPENDENCY_INSERT=1` exist only for guarded experiments and are not recommended for normal users.
 
 ### Interrupt handling
@@ -508,6 +528,24 @@ Progress: ░░░░░░░░░░░░░░░░░░░░ 0/12 Task
 
 ✓ backlog updated: Task 1.1 complete
 Progress: ██░░░░░░░░░░░░░░░░░░ 1/12 Tasks (8%)
+```
+
+Blocked proposal outcomes are reported as blocked progress, not ordinary failures:
+
+```text
+Task 3.2 blocked with SCOPE_EXPAND
+Blocked reason: implementation requires docs/api_contract.md, which is outside the approved Files scope.
+Evidence/proposal: .loop-agent/evidence/loop-4/scope_expand_proposal.md
+Human action required: accept by editing backlog Files or dependencies, or reject by revising/leaving the task blocked before retry.
+Fail count: unchanged at 0.
+```
+
+```text
+Task 5.1 blocked with SPLIT_TASK
+Blocked reason: current task requires separate storage and UI changes that need ordered child tasks.
+Evidence/proposal: .loop-agent/evidence/loop-7/split_task_proposal.md
+Human action required: accept by replacing the backlog task with reviewed child tasks, or reject by revising/leaving the task blocked before retry.
+Fail count: unchanged at 1.
 ```
 
 ---

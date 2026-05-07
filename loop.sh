@@ -2207,12 +2207,23 @@ warn_placeholder_model() {
   esac
 }
 
-# ── warn_unsafe_branch: warn if running on main/master without branch guard ─
+# ── warn_unsafe_branch: warn if running on main/master without branch guard,
+#    or if a branch-prefix requirement is configured but the current branch
+#    doesn't match (the latter is the worst case — `run` will refuse to start).
 warn_unsafe_branch() {
-  local cur_branch
+  local cur_branch prefix
   cur_branch="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
   [[ -z "$cur_branch" ]] && return 0
-  if [[ "$cur_branch" =~ ^(main|master|develop|trunk)$ ]] && [[ -z "${LOOP_REQUIRE_BRANCH_PREFIX:-}" ]]; then
+  prefix="${LOOP_REQUIRE_BRANCH_PREFIX:-}"
+
+  if [[ -n "$prefix" ]] && [[ "$cur_branch" != "$prefix"* ]]; then
+    warn "Current branch '$cur_branch' does not match LOOP_REQUIRE_BRANCH_PREFIX='$prefix'."
+    echo -e "  ${GRAY}• 'run' will refuse to start until you switch to a matching branch:${RESET}"
+    echo -e "  ${GRAY}    cd \"$PROJECT_DIR\" && git checkout -b ${prefix}work${RESET}"
+    return 0
+  fi
+
+  if [[ "$cur_branch" =~ ^(main|master|develop|trunk)$ ]] && [[ -z "$prefix" ]]; then
     warn "Current branch is '$cur_branch'. LoopDex 'run' will commit directly to it on every PASS."
     echo -e "  ${GRAY}• Recommended:  git checkout -b loop/work  &&  export LOOP_REQUIRE_BRANCH_PREFIX=loop/${RESET}"
     echo -e "  ${GRAY}• Set LOOP_REQUIRE_BRANCH_PREFIX to refuse 'run' on unintended branches.${RESET}"

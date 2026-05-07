@@ -17,11 +17,16 @@ for arg in "$@"; do
   ORIGINAL_COMMAND+=" $quoted_arg"
 done
 
-# ── Codex model/effort defaults ───────────────────────────────
-# Explicitly sets the model used by LoopDex rather than relying solely on config.toml defaults.
-# Can be overridden at runtime via environment variable:
-#   CODEX_MODEL=gpt-5.4 ./loop.sh 3 /path/to/project
-CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
+# ── User-env snapshots ────────────────────────────────────────
+# Capture user-exported env BEFORE any defaults or config loading so that
+# precedence (user env > config.env > built-in default) is preserved.
+LOOP_USER_CLI_ENV="${LOOP_CLI:-}"
+LOOP_USER_CODEX_MODEL="${CODEX_MODEL:-}"
+LOOP_USER_GEMINI_MODEL="${LOOP_GEMINI_MODEL:-}"
+LOOP_USER_BRANCH_PREFIX="${LOOP_REQUIRE_BRANCH_PREFIX:-}"
+
+# Defaults for config-managed keys are applied AFTER load_or_init_config
+# (search for "apply_config_managed_defaults"). Don't set CODEX_MODEL here.
 
 # After Impl Critic PASS, pins the implementation result as a git commit.
 # Can be disabled at runtime:
@@ -74,6 +79,158 @@ is_placeholder_model() {
   done
   return 1
 }
+
+# ── pick_one: numbered multiple-choice prompt ────────────────
+# Usage: pick_one "Prompt text" "choice 1" "choice 2" ...
+# Echoes the chosen value to stdout. Exits 1 on EOF.
+pick_one() {
+  local prompt="$1"; shift
+  local -a choices=("$@")
+  local i n
+  echo "" >&2
+  echo "$prompt" >&2
+  for ((i=0; i<${#choices[@]}; i++)); do
+    printf "  %d) %s\n" "$((i+1))" "${choices[$i]}" >&2
+  done
+  while true; do
+    printf "Choice [1-%d]: " "${#choices[@]}" >&2
+    if ! read -r n; then
+      echo "" >&2
+      return 1
+    fi
+    if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#choices[@]} )); then
+      printf '%s\n' "${choices[$((n-1))]}"
+      return 0
+    fi
+    echo "  Invalid. Enter a number from 1 to ${#choices[@]}." >&2
+  done
+}
+
+# ── parse_config_file: source whitelisted KEY=VALUE config ───
+# Lines starting with # are comments. Only known keys are exported.
+parse_config_file() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    val="${val#\"}"; val="${val%\"}"
+    val="${val#\'}"; val="${val%\'}"
+    case "$key" in
+      LOOP_CLI|CODEX_MODEL|LOOP_GEMINI_MODEL|LOOP_REQUIRE_BRANCH_PREFIX|LOOP_RISK_MODE)
+        export "$key=$val"
+        ;;
+    esac
+  done < "$f"
+}
+
+# ── run_config_wizard: interactive multiple-choice setup ─────
+# Writes .loop-agent/config.env. Skipped on non-TTY (CI).
+run_config_wizard() {
+  local cfg="$1"
+  local cfg_dir
+  cfg_dir="$(dirname "$cfg")"
+  mkdir -p "$cfg_dir"
+
+  echo "" >&2
+  echo -e "${BOLD}${CYAN}First-time setup for $(basename "$PROJECT_DIR")${RESET}" >&2
+  echo -e "${GRAY}Saved to .loop-agent/config.env — edit anytime to change.${RESET}" >&2
+
+  # 1) CLI — auto-pick if only one installed
+  local cli=""
+  local has_codex=0 has_gemini=0
+  command -v codex  >/dev/null 2>&1 && has_codex=1
+  command -v gemini >/dev/null 2>&1 && has_gemini=1
+  if (( has_codex == 1 && has_gemini == 1 )); then
+    cli="$(pick_one "AI CLI to use:" "codex" "gemini")" || return 1
+  elif (( has_codex == 1 )); then
+    cli="codex"
+    info "AI CLI: codex (auto-detected, only one installed)" >&2
+  elif (( has_gemini == 1 )); then
+    cli="gemini"
+    info "AI CLI: gemini (auto-detected, only one installed)" >&2
+  else
+    cli="$(pick_one "AI CLI to use (neither detected on PATH — install before running):" "codex" "gemini")" || return 1
+  fi
+
+  # 2) Model — fixed list + Other escape
+  local model=""
+  local -a model_options
+  case "$cli" in
+    codex)
+      model_options=("gpt-5" "gpt-5-codex" "gpt-4.1" "gpt-4o" "Other (type manually)")
+      ;;
+    gemini)
+      model_options=("gemini-2.5-pro" "gemini-2.5-flash" "gemini-1.5-pro" "Other (type manually)")
+      ;;
+  esac
+  model="$(pick_one "Model ID for ${cli}:" "${model_options[@]}")" || return 1
+  if [[ "$model" == "Other (type manually)" ]]; then
+    while [[ -z "$model" || "$model" == "Other (type manually)" ]]; do
+      printf "Model ID: " >&2
+      read -r model || return 1
+    done
+  fi
+
+  # 3) Branch prefix
+  local prefix_choice
+  prefix_choice="$(pick_one "Required git branch prefix (refuse to run on other branches):" \
+    "loop/  (recommended)" \
+    "(none — allow any branch)" \
+    "Other (type manually)")" || return 1
+  local prefix=""
+  case "$prefix_choice" in
+    "loop/  (recommended)") prefix="loop/" ;;
+    "(none — allow any branch)") prefix="" ;;
+    "Other (type manually)")
+      printf "Branch prefix (e.g. work/, feat/, leave empty to skip): " >&2
+      read -r prefix || return 1
+      ;;
+  esac
+
+  # Write config.env
+  {
+    echo "# LoopDex per-project config — generated by setup wizard"
+    echo "# Edit values or delete this file to re-run the wizard."
+    echo ""
+    echo "LOOP_CLI=$cli"
+    case "$cli" in
+      codex)  echo "CODEX_MODEL=$model" ;;
+      gemini) echo "LOOP_GEMINI_MODEL=$model" ;;
+    esac
+    [[ -n "$prefix" ]] && echo "LOOP_REQUIRE_BRANCH_PREFIX=$prefix"
+  } > "$cfg"
+
+  ok "Saved $cfg" >&2
+  echo "" >&2
+}
+
+# ── load_or_init_config: load config.env, run wizard if missing ─
+# Run mode + TTY + missing config → wizard.
+# Init mode + TTY + missing config → wizard.
+# Non-TTY or status/doctor → silently skip wizard, just load if file exists.
+load_or_init_config() {
+  local cfg="$STATE_DIR/config.env"
+  if [[ -f "$cfg" ]]; then
+    parse_config_file "$cfg"
+    return 0
+  fi
+  case "$LOOP_MODE" in
+    init|run)
+      if [[ -t 0 ]] && [[ -t 1 ]]; then
+        run_config_wizard "$cfg" || { warn "Setup cancelled."; return 0; }
+        parse_config_file "$cfg"
+      fi
+      ;;
+  esac
+}
+
 phase()  { echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
 banner() { echo -e "\n${BOLD}${CYAN}╔══════════════════════════════════════╗${RESET}"
            echo -e "${BOLD}${CYAN}║  $*${RESET}"
@@ -154,8 +311,10 @@ usage() {
 LOOP_MODE="run"
 LOOP_EXPLICIT_SUBCOMMAND=0
 MAX_LOOPS=""
+MAX_LOOPS_FROM_FLAG=0
 PROJECT_DIR=""
-LOOP_CLI="codex"
+LOOP_CLI=""
+LOOP_CLI_FROM_FLAG=0
 
 if [[ $# -eq 0 ]]; then
   err "Invalid arguments."
@@ -170,12 +329,13 @@ case "$1" in
     shift
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --iterations)
+        --iterations|-i)
           if [[ $# -lt 2 ]]; then
             err "Missing value for --iterations."
             exit 1
           fi
           MAX_LOOPS="$2"
+          MAX_LOOPS_FROM_FLAG=1
           shift 2
           ;;
         --project)
@@ -192,6 +352,7 @@ case "$1" in
             exit 1
           fi
           LOOP_CLI="$2"
+          LOOP_CLI_FROM_FLAG=1
           shift 2
           ;;
         *)
@@ -201,10 +362,6 @@ case "$1" in
           ;;
       esac
     done
-    if [[ -z "$MAX_LOOPS" ]]; then
-      err "Missing iterations for run."
-      exit 1
-    fi
     if [[ -z "$PROJECT_DIR" ]]; then
       err "Missing project."
       exit 1
@@ -230,6 +387,7 @@ case "$1" in
             exit 1
           fi
           LOOP_CLI="$2"
+          LOOP_CLI_FROM_FLAG=1
           shift 2
           ;;
         *)
@@ -263,6 +421,7 @@ case "$1" in
             exit 1
           fi
           LOOP_CLI="$2"
+          LOOP_CLI_FROM_FLAG=1
           shift 2
           ;;
         *)
@@ -282,6 +441,29 @@ case "$1" in
     fi
     PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
     STATE_DIR_STATUS="$PROJECT_DIR/.loop-agent"
+
+    # Load config so doctor/status can report stored values.
+    # Wizard does NOT run for status/doctor — only init/run trigger it.
+    DOCTOR_FLAG_CLI=""
+    [[ "$LOOP_CLI_FROM_FLAG" == "1" ]] && DOCTOR_FLAG_CLI="$LOOP_CLI"
+    if [[ -f "$STATE_DIR_STATUS/config.env" ]]; then
+      parse_config_file "$STATE_DIR_STATUS/config.env"
+    fi
+    # Precedence: CLI flag > user env > config > default
+    if [[ -n "$DOCTOR_FLAG_CLI" ]]; then
+      LOOP_CLI="$DOCTOR_FLAG_CLI"
+    elif [[ -n "$LOOP_USER_CLI_ENV" ]]; then
+      LOOP_CLI="$LOOP_USER_CLI_ENV"
+    fi
+    [[ -n "$LOOP_USER_CODEX_MODEL" ]]   && CODEX_MODEL="$LOOP_USER_CODEX_MODEL"
+    [[ -n "$LOOP_USER_GEMINI_MODEL" ]]  && LOOP_GEMINI_MODEL="$LOOP_USER_GEMINI_MODEL"
+    [[ -n "$LOOP_USER_BRANCH_PREFIX" ]] && LOOP_REQUIRE_BRANCH_PREFIX="$LOOP_USER_BRANCH_PREFIX"
+    LOOP_CLI="${LOOP_CLI:-codex}"
+    CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
+    LOOP_GEMINI_MODEL="${LOOP_GEMINI_MODEL:-gemini-3.1-pro-preview}"
+# Re-sync the cli_adapters cache (GEMINI_MODEL was set at sourcing time before config load).
+GEMINI_MODEL="$LOOP_GEMINI_MODEL"
+
     if [[ "$LOOP_MODE" == "status" ]]; then
       STATUS_BACKLOG="$STATE_DIR_STATUS/backlog.md"
       if [[ -n "${PYTHON:-}" ]]; then
@@ -468,8 +650,12 @@ PY
       fi
       LOOP_MODE="run"
       MAX_LOOPS="$1"
+      MAX_LOOPS_FROM_FLAG=1
       PROJECT_DIR="$2"
-      LOOP_CLI="${3:-codex}"
+      if [[ -n "${3:-}" ]]; then
+        LOOP_CLI="$3"
+        LOOP_CLI_FROM_FLAG=1
+      fi
     else
       err "Invalid subcommand: $1"
       usage
@@ -478,18 +664,8 @@ PY
     ;;
 esac
 
-case "$LOOP_CLI" in
-  codex|gemini) ;;
-  *)
-    err "Invalid CLI value: $LOOP_CLI (supported: codex, gemini)"
-    exit 1
-    ;;
-esac
-
-if [[ "$LOOP_MODE" == "run" ]] && ! [[ "$MAX_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
-  err "Iterations must be a positive integer: $MAX_LOOPS"
-  exit 1
-fi
+# LOOP_CLI / MAX_LOOPS validations are deferred until after load_or_init_config
+# so config.env values + interactive prompts can fill in missing pieces.
 
 if [[ "$LOOP_MODE" == "run" ]] && ! [[ "$LOOP_VERIFY_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
   err "LOOP_VERIFY_TIMEOUT must be a positive integer: $LOOP_VERIFY_TIMEOUT"
@@ -717,6 +893,58 @@ if [[ ! -d "$PROJECT_DIR" ]]; then
 fi
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 STATE_DIR="$PROJECT_DIR/.loop-agent"
+
+# ── Per-project config: load .loop-agent/config.env, run wizard if missing.
+# Precedence: CLI flag > user-exported env > config.env > built-in default.
+MAIN_FLAG_CLI=""
+[[ "$LOOP_CLI_FROM_FLAG" == "1" ]] && MAIN_FLAG_CLI="$LOOP_CLI"
+load_or_init_config
+# Precedence restore (config may have overwritten LOOP_CLI; CLI flag must win)
+if [[ -n "$MAIN_FLAG_CLI" ]]; then
+  LOOP_CLI="$MAIN_FLAG_CLI"
+elif [[ -n "$LOOP_USER_CLI_ENV" ]]; then
+  LOOP_CLI="$LOOP_USER_CLI_ENV"
+fi
+[[ -n "$LOOP_USER_CODEX_MODEL" ]]   && CODEX_MODEL="$LOOP_USER_CODEX_MODEL"
+[[ -n "$LOOP_USER_GEMINI_MODEL" ]]  && LOOP_GEMINI_MODEL="$LOOP_USER_GEMINI_MODEL"
+[[ -n "$LOOP_USER_BRANCH_PREFIX" ]] && LOOP_REQUIRE_BRANCH_PREFIX="$LOOP_USER_BRANCH_PREFIX"
+
+# Apply built-in fallback defaults for anything still empty after config + env
+LOOP_CLI="${LOOP_CLI:-codex}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
+LOOP_GEMINI_MODEL="${LOOP_GEMINI_MODEL:-gemini-3.1-pro-preview}"
+# Re-sync the cli_adapters cache (GEMINI_MODEL was set at sourcing time before config load).
+GEMINI_MODEL="$LOOP_GEMINI_MODEL"
+
+# Validate LOOP_CLI now that all sources have contributed
+case "$LOOP_CLI" in
+  codex|gemini) ;;
+  *)
+    err "Invalid CLI value: $LOOP_CLI (supported: codex, gemini)"
+    exit 1
+    ;;
+esac
+
+# Iterations: prompt interactively if not given on CLI in run mode + TTY.
+# Non-TTY (CI) without --iterations → error.
+if [[ "$LOOP_MODE" == "run" ]] && [[ -z "$MAX_LOOPS" ]]; then
+  if [[ -t 0 ]] && [[ -t 1 ]]; then
+    while true; do
+      printf "Iterations to run: " >&2
+      read -r MAX_LOOPS || { err "Iterations required for run mode."; exit 1; }
+      [[ "$MAX_LOOPS" =~ ^[1-9][0-9]*$ ]] && break
+      echo "  Must be a positive integer." >&2
+    done
+  else
+    err "Iterations required for run mode (use --iterations N or -i N)."
+    exit 1
+  fi
+fi
+
+if [[ "$LOOP_MODE" == "run" ]] && ! [[ "$MAX_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
+  err "Iterations must be a positive integer: $MAX_LOOPS"
+  exit 1
+fi
 
 if ! clean_tree_preflight; then
   exit 1

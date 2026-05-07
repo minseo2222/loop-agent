@@ -18,9 +18,13 @@ git clone https://github.com/minseo2222/LoopDex.git
 cd LoopDex && chmod +x loop.sh
 
 # 3. Drop your planning docs into a project folder, then:
-./loop.sh init --project /path/to/myproject --cli codex   # generate & approve backlog
-./loop.sh run  --project /path/to/myproject --cli codex --iterations 5
+./loop.sh init --project /path/to/myproject     # first run launches a setup wizard
+./loop.sh run  --project /path/to/myproject     # asks for iterations interactively
 ```
+
+The first `init` or `run` opens a multiple-choice wizard for **CLI**, **model ID**, and **required branch prefix**, and saves the answers to `.loop-agent/config.env`. From the second run onward you just type `./loop.sh run --project <dir>` and it asks only for iteration count. Edit or delete `config.env` to change settings.
+
+Precedence: **CLI flag** > **exported env var** > **config.env** > **built-in default**.
 
 `init` also bootstraps your project: initializes git if missing, and **auto-fills `.gitignore`** with:
 - A Secrets block (`.env`, `*.pem`, `*.key`, `id_rsa`, …) so the initial commit can't accidentally include credentials.
@@ -102,17 +106,19 @@ After a rate-limit exit, just re-run the same command once the limit resets. Alr
 
 ```bash
 ./loop.sh init   --project <dir> [--cli codex|gemini]
-./loop.sh run    --project <dir> [--cli codex|gemini] --iterations N
+./loop.sh run    --project <dir> [--cli codex|gemini] [--iterations N | -i N]
 ./loop.sh status --project <dir>
 ./loop.sh doctor --project <dir>
 ```
 
-`run` is unattended and requires:
+If `.loop-agent/config.env` is missing on `init` or `run` (and stdin is a TTY), a multiple-choice wizard runs once and stores your CLI / model / branch-prefix preferences. Subsequent runs read it automatically. CI / non-TTY skip the wizard and rely on built-in defaults.
+
+`run` requires iterations: pass `--iterations N` / `-i N`, or be prompted interactively. CI must pass the flag. It also requires:
 - An existing `.loop-agent/backlog.md` (run `init` first)
 - A clean working tree (commit/stash your own work)
 - Backlog passes `python backlog_manager.py lint`
 
-Optional: enforce a dedicated branch with `LOOP_REQUIRE_BRANCH_PREFIX=loop/`.
+Optional: enforce a dedicated branch with `LOOP_REQUIRE_BRANCH_PREFIX=loop/` (the wizard offers `loop/` as a recommended option).
 
 ---
 

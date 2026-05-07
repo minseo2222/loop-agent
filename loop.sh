@@ -2323,6 +2323,7 @@ bootstrap_language_gitignore() {
   local gi="$PROJECT_DIR/.gitignore"
   [[ -f "$gi" ]] || printf '' > "$gi"
   local added=()
+  local backlog_path="$PROJECT_DIR/.loop-agent/backlog.md"
 
   _gi_add_block() {
     local marker="$1"; shift
@@ -2332,6 +2333,29 @@ bootstrap_language_gitignore() {
       printf '%s\n' "$@"
     } >> "$gi"
     added+=("${marker#\# }")
+  }
+
+  # Detection sources: filesystem signal files OR backlog mentions of those
+  # signal files. The backlog scan handles cases where the project hasn't
+  # been scaffolded yet — e.g. Task 1.1 will create pyproject.toml — so
+  # patterns are in place before the agent's verify step generates
+  # *.egg-info/ or __pycache__/ that would otherwise trip the scope gate.
+  _signal_in_fs() {
+    local pat
+    for pat in "$@"; do
+      compgen -G "$PROJECT_DIR/$pat" >/dev/null 2>&1 && return 0
+    done
+    return 1
+  }
+  _signal_in_backlog() {
+    [[ -f "$backlog_path" ]] || return 1
+    grep -qF "$1" "$backlog_path" 2>/dev/null
+  }
+  _have_signal() {
+    # $1 = literal filename to look for in backlog; remaining args = fs globs
+    local backlog_key="$1"; shift
+    _signal_in_fs "$@" && return 0
+    _signal_in_backlog "$backlog_key"
   }
 
   # Secrets — always added regardless of language. Mirrors the secret_path_guard
@@ -2347,11 +2371,10 @@ bootstrap_language_gitignore() {
     ".DS_Store" "Thumbs.db" \
     ".idea/" ".vscode/" "*.swp" "*.swo"
 
-  # Python
-  if compgen -G "$PROJECT_DIR/pyproject.toml" >/dev/null 2>&1 \
-     || compgen -G "$PROJECT_DIR/setup.py" >/dev/null 2>&1 \
-     || compgen -G "$PROJECT_DIR/requirements*.txt" >/dev/null 2>&1 \
-     || compgen -G "$PROJECT_DIR/*.py" >/dev/null 2>&1; then
+  # Python — fs OR backlog mentions pyproject.toml / setup.py / requirements*.txt
+  if _have_signal "pyproject.toml" "pyproject.toml" "setup.py" "requirements*.txt" "*.py" \
+     || _signal_in_backlog "setup.py" \
+     || _signal_in_backlog "requirements.txt"; then
     _gi_add_block "# Python" \
       "__pycache__/" "*.py[cod]" "*\$py.class" \
       "*.egg-info/" "*.egg" \
@@ -2362,35 +2385,56 @@ bootstrap_language_gitignore() {
   fi
 
   # Node
-  if [[ -f "$PROJECT_DIR/package.json" ]]; then
+  if _have_signal "package.json" "package.json"; then
     _gi_add_block "# Node" \
       "node_modules/" "dist/" "build/" ".next/" "coverage/" \
       "*.log" ".env.local"
   fi
 
   # Rust
-  if [[ -f "$PROJECT_DIR/Cargo.toml" ]]; then
+  if _have_signal "Cargo.toml" "Cargo.toml"; then
     _gi_add_block "# Rust" "target/"
   fi
 
   # Go
-  if [[ -f "$PROJECT_DIR/go.mod" ]]; then
+  if _have_signal "go.mod" "go.mod"; then
     _gi_add_block "# Go" "vendor/"
   fi
 
   # Java / Maven
-  if [[ -f "$PROJECT_DIR/pom.xml" ]]; then
+  if _have_signal "pom.xml" "pom.xml"; then
     _gi_add_block "# Maven" "target/" "*.class"
   fi
 
   # Java / Gradle
-  if compgen -G "$PROJECT_DIR/build.gradle*" >/dev/null 2>&1; then
+  if _have_signal "build.gradle" "build.gradle*"; then
     _gi_add_block "# Gradle" "build/" ".gradle/"
   fi
 
   if (( ${#added[@]} > 0 )); then
     info "Bootstrapped .gitignore for: ${added[*]}"
     info "Review and commit the updated .gitignore before running ./loop.sh run"
+  fi
+}
+
+# ── bootstrap_language_gitignore_post_backlog ─────────────────
+# Re-run bootstrap after the backlog is in place, so language signals
+# from the backlog (e.g. pyproject.toml that Task 1.1 will create) get
+# their ignore patterns added. If .gitignore was already committed and
+# this call makes it dirty, create a new commit so init ends clean.
+bootstrap_language_gitignore_post_backlog() {
+  bootstrap_language_gitignore
+  # No git → nothing to commit (probably first init failed earlier).
+  git -C "$PROJECT_DIR" rev-parse --git-dir &>/dev/null || return 0
+  # No change → no commit.
+  if git -C "$PROJECT_DIR" diff --quiet -- .gitignore 2>/dev/null; then
+    return 0
+  fi
+  if git -C "$PROJECT_DIR" add .gitignore 2>/dev/null \
+     && git -C "$PROJECT_DIR" commit -q -m "loop-agent: extend .gitignore from backlog scan" 2>/dev/null; then
+    ok ".gitignore extended and committed (backlog-driven language detection)"
+  else
+    warn "Could not commit updated .gitignore — review and commit manually"
   fi
 }
 
@@ -3733,7 +3777,6 @@ setup_phase() {
 git_ensure_init
 
 if [[ "$LOOP_MODE" == "init" ]]; then
-  bootstrap_language_gitignore
   warn_placeholder_model
   cleanup_orphaned_backups
   if [[ "${LOOP_BACKLOG_SOURCE:-generated}" == "user" ]]; then
@@ -3755,6 +3798,11 @@ if [[ "$LOOP_MODE" == "init" ]]; then
   else
     setup_phase
   fi
+  # Backlog now exists in either path. Re-scan languages from backlog to
+  # catch project types that aren't on disk yet (e.g. Task 1.1 will create
+  # pyproject.toml). If new patterns were added, commit them so the working
+  # tree stays clean for `run`.
+  bootstrap_language_gitignore_post_backlog
   init_align_branch_to_prefix
   warn_unsafe_branch
   ok "Init complete. Backlog: $BACKLOG"

@@ -65,11 +65,11 @@ ok()     { echo -e "${GREEN}✓ $*${RESET}"; }
 info()   { echo -e "${GRAY}  $*${RESET}"; }
 warn()   { echo -e "${YELLOW}⚠ $*${RESET}"; }
 
-# README defaults (gpt-5.5, gemini-3.1-pro-preview) are placeholders, not real
-# model IDs. Detect at startup and in doctor so the user can override before
-# any agent call fails and consumes fail_count.
-LOOP_PLACEHOLDER_CODEX_MODELS=("gpt-5.5" "gpt-5.4")
-LOOP_PLACEHOLDER_GEMINI_MODELS=("gemini-3.1-pro-preview")
+# Placeholder model IDs (kept empty by default — every shipped default is now
+# a real model ID per the wizard list). Add IDs here if a future LoopDex
+# release ships an unverified default that should warn users at startup.
+LOOP_PLACEHOLDER_CODEX_MODELS=()
+LOOP_PLACEHOLDER_GEMINI_MODELS=()
 
 is_placeholder_model() {
   local val="$1"; shift
@@ -164,10 +164,26 @@ run_config_wizard() {
   local -a model_options
   case "$cli" in
     codex)
-      model_options=("gpt-5" "gpt-5-codex" "gpt-4.1" "gpt-4o" "Other (type manually)")
+      model_options=(
+        "gpt-5.5"
+        "gpt-5.4"
+        "gpt-5.4-mini"
+        "gpt-5.3-codex"
+        "gpt-5.3-codex-spark"
+        "gpt-5.2"
+        "Other (type manually)"
+      )
       ;;
     gemini)
-      model_options=("gemini-2.5-pro" "gemini-2.5-flash" "gemini-1.5-pro" "Other (type manually)")
+      model_options=(
+        "gemini-3.1-pro-preview"
+        "gemini-3.1-pro-preview-customtools"
+        "gemini-3-flash-preview"
+        "gemini-3.1-flash-lite-preview"
+        "gemini-2.5-pro"
+        "gemini-2.5-flash"
+        "Other (type manually)"
+      )
       ;;
   esac
   model="$(pick_one "Model ID for ${cli}:" "${model_options[@]}")" || return 1

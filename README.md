@@ -153,18 +153,16 @@ For typical use, the **setup wizard** handles `LOOP_CLI`, `CODEX_MODEL` / `LOOP_
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CODEX_MODEL` | `gpt-5.5` (placeholder) | Model ID — **must be overridden** to a real ID your account exposes; LoopDex warns at startup and in `doctor` if left as the placeholder |
+| `CODEX_MODEL` | `gpt-5.5` | Model ID. The wizard offers `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2`, plus an "Other" escape for IDs not in the list. |
 
 ### Gemini
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LOOP_GEMINI_MODEL` | `gemini-3.1-pro-preview` (placeholder) | Model ID — **must be overridden** to a real ID; LoopDex warns at startup and in `doctor` if left as the placeholder |
+| `LOOP_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Model ID. Wizard offers `gemini-3.1-pro-preview`, `gemini-3.1-pro-preview-customtools`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`, plus an "Other" escape. |
 | `LOOP_GEMINI_FLAGS` | `--yolo` (unattended) / empty (safe) | Override CLI flags |
 | `LOOP_GEMINI_MODEL_FLAG` | `--model` | Flag used to specify the model |
 | `LOOP_GEMINI_USE_PROMPT_ARG` | `0` | `1` = pass prompt via `-p` instead of stdin |
-
-> Default model IDs are placeholders. Override them.
 
 ---
 
@@ -270,7 +268,6 @@ You can also generate the backlog yourself in Claude Code by pasting `backlog_gu
 | pnpm not found in Git Bash | Add `/c/Users/<you>/AppData/Roaming/npm` to `PATH` |
 | `Iterations required for run mode` | Pass `-i N` (CI/non-TTY) or run from an interactive terminal to be prompted |
 | Want to change CLI / model / branch prefix later | Edit `.loop-agent/config.env`, or delete it to re-run the wizard |
-| `CODEX_MODEL='gpt-5.5' is a README placeholder` | Re-run `init` (wizard sets a real ID) or `export CODEX_MODEL=<your-real-id>` |
 | Scope gate keeps flagging build artifacts | Re-run `./loop.sh init` to refresh `.gitignore`, or add the standard language patterns manually. If files are already tracked, `git rm --cached <path>` |
 | Exit code 2 (rate limit) | Wait, then re-run the same command — completed tasks are skipped |
 | Not sure if the environment is ready | `./loop.sh doctor --project <dir>` reports git / Python / CLI / model / branch / backlog status |
@@ -342,7 +339,7 @@ The legacy `run.sh` document-driven workflow is retained for compatibility; see 
 - **Third-party services.** LoopDex invokes external CLIs (OpenAI Codex, Google Gemini, optionally Anthropic Claude Code). Your docs, source, and prompts are transmitted under those providers' policies. Don't feed sensitive or regulated data unless your provider terms permit.
 - **Terms of service.** You are responsible for ensuring looped, automated CLI invocation complies with each provider's ToS. The authors make no representation that any usage pattern is permitted, and accept no liability for suspensions or charges.
 - **Trademarks.** "ChatGPT", "Codex", "GPT" — OpenAI. "Gemini", "Vertex AI", "Google Cloud" — Google LLC. "Claude", "Claude Code" — Anthropic. Use here is nominative; no endorsement implied.
-- **Model names.** Defaults like `gpt-5.5` and `gemini-3.1-pro-preview` are placeholders — override via env vars to match your account.
+- **Model names.** Default model IDs (e.g. `gpt-5.5`, `gemini-3.1-pro-preview`) reflect IDs that worked at release. Provider availability shifts over time; if a default returns "model not found", pick a different ID via the wizard or `CODEX_MODEL` / `LOOP_GEMINI_MODEL`.
 - **Autonomous execution.** LoopDex runs AI-generated code without per-step approval. You choose the target directory and runtime environment.
 - **Input content.** You retain ownership of your docs and code. By running LoopDex you confirm you have the right to share that content with your configured providers.
 

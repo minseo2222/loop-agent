@@ -37,6 +37,13 @@ LOOP_MAX_ATTEMPTS="${LOOP_MAX_ATTEMPTS:-5}"
 # Keep the newest N loop evidence directories; 0 disables evidence retention.
 LOOP_EVIDENCE_KEEP_RUNS="${LOOP_EVIDENCE_KEEP_RUNS:-10}"
 
+# Prune the current loop's evidence directory immediately after a PASS commit.
+# Defaults to 1: PASS-loop diffs/verify outputs are redundant with git history,
+# so removing them keeps .loop-agent/evidence/ small. Set to 0 to retain
+# PASS evidence (e.g. for forensic auditing). FAIL/BLOCKED/proposal evidence
+# is never affected by this flag.
+LOOP_EVIDENCE_PRUNE_PASS="${LOOP_EVIDENCE_PRUNE_PASS:-1}"
+
 # Risk mode controls built-in CLI bypass flags for unattended execution.
 LOOP_RISK_MODE="${LOOP_RISK_MODE:-unattended}"
 
@@ -52,6 +59,21 @@ err()    { echo -e "${RED}Error: $*${RESET}" >&2; }
 ok()     { echo -e "${GREEN}✓ $*${RESET}"; }
 info()   { echo -e "${GRAY}  $*${RESET}"; }
 warn()   { echo -e "${YELLOW}⚠ $*${RESET}"; }
+
+# README defaults (gpt-5.5, gemini-3.1-pro-preview) are placeholders, not real
+# model IDs. Detect at startup and in doctor so the user can override before
+# any agent call fails and consumes fail_count.
+LOOP_PLACEHOLDER_CODEX_MODELS=("gpt-5.5" "gpt-5.4")
+LOOP_PLACEHOLDER_GEMINI_MODELS=("gemini-3.1-pro-preview")
+
+is_placeholder_model() {
+  local val="$1"; shift
+  local m
+  for m in "$@"; do
+    [[ "$val" == "$m" ]] && return 0
+  done
+  return 1
+}
 phase()  { echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
 banner() { echo -e "\n${BOLD}${CYAN}╔══════════════════════════════════════╗${RESET}"
            echo -e "${BOLD}${CYAN}║  $*${RESET}"
@@ -372,6 +394,33 @@ PY
         echo "AI CLI ($LOOP_CLI): available"
       else
         echo "AI CLI ($LOOP_CLI): missing"
+      fi
+
+      case "$LOOP_CLI" in
+        codex)
+          if is_placeholder_model "${CODEX_MODEL:-}" "${LOOP_PLACEHOLDER_CODEX_MODELS[@]}"; then
+            echo "Model: PLACEHOLDER (CODEX_MODEL='$CODEX_MODEL' — override with a real ID)"
+          else
+            echo "Model: $CODEX_MODEL"
+          fi
+          ;;
+        gemini)
+          gem_cur="${GEMINI_MODEL:-${LOOP_GEMINI_MODEL:-}}"
+          if is_placeholder_model "$gem_cur" "${LOOP_PLACEHOLDER_GEMINI_MODELS[@]}"; then
+            echo "Model: PLACEHOLDER (LOOP_GEMINI_MODEL='$gem_cur' — override with a real ID)"
+          else
+            echo "Model: $gem_cur"
+          fi
+          ;;
+      esac
+
+      if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        DOCTOR_BRANCH="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+        if [[ "$DOCTOR_BRANCH" =~ ^(main|master|develop|trunk)$ ]] && [[ -z "${LOOP_REQUIRE_BRANCH_PREFIX:-}" ]]; then
+          echo "Branch: $DOCTOR_BRANCH (warning: 'run' will commit directly here; consider LOOP_REQUIRE_BRANCH_PREFIX)"
+        else
+          echo "Branch: $DOCTOR_BRANCH"
+        fi
       fi
 
       if [[ -f "$DOCTOR_BACKLOG" ]]; then
@@ -1630,7 +1679,11 @@ append_shell_report() {
     echo "**Model:** ${report_model}  "
     echo "**Effort:** planner=${PLANNER_EFFORT}, plan_critic=${PLAN_CRITIC_EFFORT}, implementer=${IMPLEMENTER_EFFORT}, impl_critic=${IMPL_CRITIC_EFFORT}, reporter=none  "
     if [[ "$status" == "PASS" ]]; then
-      echo "**Evidence:** ${EVIDENCE_REL:-none}  "
+      if [[ "${LOOP_EVIDENCE_PRUNE_PASS:-1}" == "1" ]] && [[ -n "${PASS_COMMIT_HASH:-}" ]]; then
+        echo "**Evidence:** pruned (redundant with commit ${PASS_COMMIT_HASH})  "
+      else
+        echo "**Evidence:** ${EVIDENCE_REL:-none}  "
+      fi
       if [[ -n "${PASS_COMMIT_HASH:-}" ]]; then
         echo "**PASS commit:** ${PASS_COMMIT_HASH}  "
       else
@@ -1880,6 +1933,36 @@ export_vars() {
   export LOOP_REPORT="$REPORT"
 }
 
+warn_placeholder_model() {
+  case "$LOOP_CLI" in
+    codex)
+      if is_placeholder_model "${CODEX_MODEL:-}" "${LOOP_PLACEHOLDER_CODEX_MODELS[@]}"; then
+        warn "CODEX_MODEL='$CODEX_MODEL' is a README placeholder, not a real model ID."
+        echo -e "  ${GRAY}• Override before running:  export CODEX_MODEL=<id-your-account-exposes>${RESET}"
+        echo -e "  ${GRAY}• Otherwise the codex CLI will fail and fail_count will increment toward BLOCKED.${RESET}"
+      fi
+      ;;
+    gemini)
+      if is_placeholder_model "${GEMINI_MODEL:-${LOOP_GEMINI_MODEL:-}}" "${LOOP_PLACEHOLDER_GEMINI_MODELS[@]}"; then
+        warn "LOOP_GEMINI_MODEL='${GEMINI_MODEL:-${LOOP_GEMINI_MODEL:-}}' is a README placeholder, not a real model ID."
+        echo -e "  ${GRAY}• Override before running:  export LOOP_GEMINI_MODEL=<id-your-account-exposes>${RESET}"
+      fi
+      ;;
+  esac
+}
+
+# ── warn_unsafe_branch: warn if running on main/master without branch guard ─
+warn_unsafe_branch() {
+  local cur_branch
+  cur_branch="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+  [[ -z "$cur_branch" ]] && return 0
+  if [[ "$cur_branch" =~ ^(main|master|develop|trunk)$ ]] && [[ -z "${LOOP_REQUIRE_BRANCH_PREFIX:-}" ]]; then
+    warn "Current branch is '$cur_branch'. LoopDex 'run' will commit directly to it on every PASS."
+    echo -e "  ${GRAY}• Recommended:  git checkout -b loop/work  &&  export LOOP_REQUIRE_BRANCH_PREFIX=loop/${RESET}"
+    echo -e "  ${GRAY}• Set LOOP_REQUIRE_BRANCH_PREFIX to refuse 'run' on unintended branches.${RESET}"
+  fi
+}
+
 # ── git_init: initialize git if not present ───────────────────
 git_ensure_init() {
   if ! git -C "$PROJECT_DIR" rev-parse --git-dir &>/dev/null; then
@@ -1913,6 +1996,11 @@ git_ensure_init() {
       fi
     done < <(find "$PROJECT_DIR" -mindepth 2 -name ".git" -not -path "$PROJECT_DIR/.git" -print0 2>/dev/null)
 
+    # Add language-specific ignore patterns BEFORE the initial add -A so that
+    # pre-existing build artifacts (__pycache__/, node_modules/, *.egg-info/,
+    # target/, .venv/ ...) are not committed into git history on first init.
+    bootstrap_language_gitignore
+
     git -C "$PROJECT_DIR" add -A
     git -C "$PROJECT_DIR" commit -q -m "loop-agent: initial commit before loop 1"
     ok "git initialized"
@@ -1923,6 +2011,86 @@ git_ensure_init() {
     fi
     # Set core.autocrlf false
     git -C "$PROJECT_DIR" config core.autocrlf false
+  fi
+}
+
+# ── bootstrap_language_gitignore: add standard ignore patterns ─
+# Detects common language projects and appends idiomatic ignore
+# patterns to .gitignore so verify-tool byproducts (build artifacts,
+# caches) don't trip the scope gate. Idempotent via marker comments.
+# Called from init mode only — run mode never edits user .gitignore.
+bootstrap_language_gitignore() {
+  local gi="$PROJECT_DIR/.gitignore"
+  [[ -f "$gi" ]] || printf '' > "$gi"
+  local added=()
+
+  _gi_add_block() {
+    local marker="$1"; shift
+    grep -qF "$marker" "$gi" 2>/dev/null && return
+    {
+      printf '\n%s\n' "$marker"
+      printf '%s\n' "$@"
+    } >> "$gi"
+    added+=("${marker#\# }")
+  }
+
+  # Secrets — always added regardless of language. Mirrors the secret_path_guard
+  # patterns so the initial git add -A does not commit credentials. Path-based
+  # only; review .gitignore for project-specific secret files.
+  _gi_add_block "# Secrets" \
+    ".env" ".env.*" "!.env.example" "!.env.sample" \
+    "*.pem" "*.key" "id_rsa" "id_ed25519" \
+    ".ssh/" "*.pfx" "*.p12"
+
+  # Editor / OS metadata — frequently land in working tree from tooling.
+  _gi_add_block "# Editor / OS" \
+    ".DS_Store" "Thumbs.db" \
+    ".idea/" ".vscode/" "*.swp" "*.swo"
+
+  # Python
+  if compgen -G "$PROJECT_DIR/pyproject.toml" >/dev/null 2>&1 \
+     || compgen -G "$PROJECT_DIR/setup.py" >/dev/null 2>&1 \
+     || compgen -G "$PROJECT_DIR/requirements*.txt" >/dev/null 2>&1 \
+     || compgen -G "$PROJECT_DIR/*.py" >/dev/null 2>&1; then
+    _gi_add_block "# Python" \
+      "__pycache__/" "*.py[cod]" "*\$py.class" \
+      "*.egg-info/" "*.egg" \
+      ".pytest_cache/" ".mypy_cache/" ".ruff_cache/" \
+      ".coverage" "htmlcov/" ".tox/" \
+      "build/" "dist/" \
+      ".venv/" "venv/" "env/"
+  fi
+
+  # Node
+  if [[ -f "$PROJECT_DIR/package.json" ]]; then
+    _gi_add_block "# Node" \
+      "node_modules/" "dist/" "build/" ".next/" "coverage/" \
+      "*.log" ".env.local"
+  fi
+
+  # Rust
+  if [[ -f "$PROJECT_DIR/Cargo.toml" ]]; then
+    _gi_add_block "# Rust" "target/"
+  fi
+
+  # Go
+  if [[ -f "$PROJECT_DIR/go.mod" ]]; then
+    _gi_add_block "# Go" "vendor/"
+  fi
+
+  # Java / Maven
+  if [[ -f "$PROJECT_DIR/pom.xml" ]]; then
+    _gi_add_block "# Maven" "target/" "*.class"
+  fi
+
+  # Java / Gradle
+  if compgen -G "$PROJECT_DIR/build.gradle*" >/dev/null 2>&1; then
+    _gi_add_block "# Gradle" "build/" ".gradle/"
+  fi
+
+  if (( ${#added[@]} > 0 )); then
+    info "Bootstrapped .gitignore for: ${added[*]}"
+    info "Review and commit the updated .gitignore before running ./loop.sh run"
   fi
 }
 
@@ -3265,8 +3433,11 @@ setup_phase() {
 git_ensure_init
 
 if [[ "$LOOP_MODE" == "init" ]]; then
+  bootstrap_language_gitignore
+  warn_placeholder_model
   cleanup_orphaned_backups
   setup_phase
+  warn_unsafe_branch
   ok "Init complete. Backlog: $BACKLOG"
   exit 0
 fi
@@ -3306,6 +3477,9 @@ case "$LOOP_CLI" in
   gemini) echo -e "  CLI:      ${CYAN}gemini${RESET} (model: $GEMINI_MODEL)" ;;
 esac
 echo -e "  Risk mode: $LOOP_RISK_MODE"
+
+warn_placeholder_model
+warn_unsafe_branch
 
 # COMMIT_ON_PASS=0 accumulates PASS results in the working tree.
 # The next loop's git_snapshot absorbs them into the baseline, which may
@@ -4792,13 +4966,19 @@ PY
       echo "Completed steps:"
       echo "$COMPLETED_TASKS"
     fi
-    echo "Evidence: $EVIDENCE_REL"
+    if [[ "${LOOP_EVIDENCE_PRUNE_PASS:-1}" == "1" ]] && [[ -n "$PASS_COMMIT_HASH" ]]; then
+      echo "Evidence: pruned (redundant with commit $PASS_COMMIT_HASH)"
+    else
+      echo "Evidence: $EVIDENCE_REL"
+    fi
     if [[ -n "$PASS_COMMIT_HASH" ]]; then
       echo "PASS commit: $PASS_COMMIT_HASH"
     else
       echo "PASS commit: skipped"
     fi
-    echo "PASS result: ${EVIDENCE_REL}pass_result.md"
+    if [[ "${LOOP_EVIDENCE_PRUNE_PASS:-1}" != "1" ]] || [[ -z "$PASS_COMMIT_HASH" ]]; then
+      echo "PASS result: ${EVIDENCE_REL}pass_result.md"
+    fi
     echo "Report: .loop-agent/report.md"
     echo ""
   } >> "$PROGRESS"
@@ -4828,6 +5008,21 @@ PY
   add_result "Loop ${LOOP}: PASS — $NEXT_TASK_ID"
   transaction_complete "PASS"
   info "progress.txt updated"
+
+  # Prune PASS evidence — diffs/verify outputs are redundant with git history.
+  # Only runs after a successful commit; FAIL/BLOCKED/proposal evidence is untouched.
+  if [[ "$LOOP_EVIDENCE_PRUNE_PASS" == "1" ]] \
+     && [[ -n "$PASS_COMMIT_HASH" ]] \
+     && [[ -n "${EVIDENCE_DIR:-}" ]] \
+     && [[ -d "$EVIDENCE_DIR" ]]; then
+    case "$EVIDENCE_DIR" in
+      "$EVIDENCE_ROOT"/loop-*)
+        rm -rf -- "$EVIDENCE_DIR" \
+          && info "PASS evidence pruned: $EVIDENCE_REL (set LOOP_EVIDENCE_PRUNE_PASS=0 to retain)" \
+          || warn "PASS evidence prune failed: $EVIDENCE_DIR"
+        ;;
+    esac
+  fi
 
   sleep 2  # prevent rate limiting
 

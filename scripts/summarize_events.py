@@ -203,7 +203,7 @@ def evidence_dir(value):
     return ""
 
 
-def collect_evidence(events, tasks):
+def collect_evidence(events, tasks, project_root=None):
     refs = []
     for event in events:
         for key in ("evidence_rel", "evidence_dir", "verify_results_path", "verify_commands_path"):
@@ -213,7 +213,13 @@ def collect_evidence(events, tasks):
             refs.append(evidence_dir(value))
         for line in task["lines"]:
             refs.append(evidence_dir(line))
-    return unique(refs)
+    refs = unique(refs)
+    # Drop references to pruned (deleted) evidence dirs so the final report
+    # only points at locations the user can actually inspect. PASS evidence is
+    # pruned by default (LOOP_EVIDENCE_PRUNE_PASS=1); FAIL/BLOCKED dirs persist.
+    if project_root is not None:
+        refs = [r for r in refs if r and (project_root / r).exists()]
+    return refs
 
 
 def section(title, values):
@@ -238,7 +244,7 @@ def write_report(args):
     lines += section("Blocked policy outcomes", collect_policy_blocks(events))
     lines += section("Blocked tasks", collect_blocked(tasks))
     lines += section("Proposal files", collect_proposals(state_dir / "proposals"))
-    lines += section("Evidence references", collect_evidence(events, tasks))
+    lines += section("Evidence references", collect_evidence(events, tasks, project))
     lines += section("Latest progress window", [".loop-agent/progress_window.md"] if progress_window.exists() else [])
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines), encoding="utf-8")

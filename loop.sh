@@ -2207,6 +2207,39 @@ warn_placeholder_model() {
   esac
 }
 
+# ── init_align_branch_to_prefix: auto-switch the project to a branch that
+#    matches LOOP_REQUIRE_BRANCH_PREFIX so init produces a runnable state.
+# Without this, `git_ensure_init` lands on git's default branch (often
+# `master`) while the wizard's recommended prefix is `loop/`, leaving every
+# fresh init in a state that `run` will refuse. Called only from init mode.
+init_align_branch_to_prefix() {
+  local prefix="${LOOP_REQUIRE_BRANCH_PREFIX:-}"
+  [[ -z "$prefix" ]] && return 0
+
+  local cur target
+  cur="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+  [[ -z "$cur" ]] && return 0
+  [[ "$cur" == "$prefix"* ]] && return 0
+
+  target="${prefix}work"
+
+  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$target"; then
+    if git -C "$PROJECT_DIR" checkout -q "$target" 2>/dev/null; then
+      info "Switched from '$cur' to existing branch '$target' (matches required prefix '$prefix')"
+    else
+      warn "Could not switch to existing branch '$target'. Switch manually:"
+      echo -e "  ${GRAY}cd \"$PROJECT_DIR\" && git checkout $target${RESET}"
+    fi
+  else
+    if git -C "$PROJECT_DIR" checkout -q -b "$target" 2>/dev/null; then
+      info "Created branch '$target' from '$cur' (required prefix '$prefix')"
+    else
+      warn "Could not create branch '$target'. Create it manually:"
+      echo -e "  ${GRAY}cd \"$PROJECT_DIR\" && git checkout -b $target${RESET}"
+    fi
+  fi
+}
+
 # ── warn_unsafe_branch: warn if running on main/master without branch guard,
 #    or if a branch-prefix requirement is configured but the current branch
 #    doesn't match (the latter is the worst case — `run` will refuse to start).
@@ -3722,6 +3755,7 @@ if [[ "$LOOP_MODE" == "init" ]]; then
   else
     setup_phase
   fi
+  init_align_branch_to_prefix
   warn_unsafe_branch
   ok "Init complete. Backlog: $BACKLOG"
   exit 0

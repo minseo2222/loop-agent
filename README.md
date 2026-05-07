@@ -35,6 +35,17 @@ This runs **before** the initial `git add -A`, so pre-existing `__pycache__/`, `
 
 > ⚠️ LoopDex executes AI-generated code without per-step approval. Read [Safety](#safety) before pointing it at anything you care about.
 
+### First run, step by step
+
+1. **Install + log in** to your CLI of choice (`codex login` or `gemini`).
+2. **Make a project folder** with your planning docs (`SPEC.md`, `REQUIREMENTS.md`, `docs/*.md` — names don't matter).
+3. **`./loop.sh init --project <dir>`** — runs the setup wizard, bootstraps `.gitignore`, then has the Setup Agent generate `backlog.md` and the Setup Critic review it. You approve with `y`.
+4. **(Recommended) move to a dedicated branch** in the project:  `cd <dir> && git checkout -b loop/work`. If you picked `loop/` as the required prefix in the wizard, this is required before `run`.
+5. **`./loop.sh run --project <dir>`** — type the iteration count when prompted (or pass `-i N`). The loop starts.
+6. **(Optional) `./loop.sh doctor --project <dir>`** before step 5 to pre-flight check git / Python / CLI / model / branch / backlog lint.
+
+To change settings later: edit `.loop-agent/config.env`, or delete it to re-run the wizard on next invocation.
+
 ---
 
 ## Why it exists
@@ -124,6 +135,8 @@ Optional: enforce a dedicated branch with `LOOP_REQUIRE_BRANCH_PREFIX=loop/` (th
 
 ## Configuration
 
+For typical use, the **setup wizard** handles `LOOP_CLI`, `CODEX_MODEL` / `LOOP_GEMINI_MODEL`, and `LOOP_REQUIRE_BRANCH_PREFIX` — values get stored in `.loop-agent/config.env`. The env vars below are for one-off overrides (CLI flag > env var > config.env > built-in default) or for behavior the wizard doesn't cover.
+
 ### Common
 
 | Variable | Default | Purpose |
@@ -196,13 +209,14 @@ See [`docs/security.md`](docs/security.md) for boundaries and known limitations.
 ```
 myproject/
   .loop-agent/
+    config.env             ← per-project wizard answers (CLI / model / branch prefix)
     backlog.md             ← task list + completion status (source of truth)
     events.jsonl           ← machine-readable event log (status/reports source)
     progress.txt           ← raw per-loop debug log (auto-trimmed)
     progress_window.md     ← bounded Markdown context for agents (not source of truth)
     report.md              ← cumulative report
     current_transaction.json
-    evidence/loop-N/       ← per-loop verify/scope/diff evidence
+    evidence/loop-N/       ← per-loop verify/scope/diff evidence (FAIL/BLOCKED only by default)
     reports/               ← per-loop detail
     codex.log              ← agent stderr
 ```
@@ -254,8 +268,12 @@ You can also generate the backlog yourself in Claude Code by pasting `backlog_gu
 | `python not found` | Install Python 3.8+ (avoid Windows Store launcher) |
 | `gemini --version failed` | Override flags via `LOOP_GEMINI_*` |
 | pnpm not found in Git Bash | Add `/c/Users/<you>/AppData/Roaming/npm` to `PATH` |
+| `Iterations required for run mode` | Pass `-i N` (CI/non-TTY) or run from an interactive terminal to be prompted |
+| Want to change CLI / model / branch prefix later | Edit `.loop-agent/config.env`, or delete it to re-run the wizard |
+| `CODEX_MODEL='gpt-5.5' is a README placeholder` | Re-run `init` (wizard sets a real ID) or `export CODEX_MODEL=<your-real-id>` |
 | Scope gate keeps flagging build artifacts | Re-run `./loop.sh init` to refresh `.gitignore`, or add the standard language patterns manually. If files are already tracked, `git rm --cached <path>` |
 | Exit code 2 (rate limit) | Wait, then re-run the same command — completed tasks are skipped |
+| Not sure if the environment is ready | `./loop.sh doctor --project <dir>` reports git / Python / CLI / model / branch / backlog status |
 
 ---
 

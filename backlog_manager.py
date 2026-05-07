@@ -237,7 +237,18 @@ def extract_task_verify_commands(section):
         backtick_values = re.findall(r'`([^`]+)`', value)
         if backtick_values:
             commands.extend(command.strip() for command in backtick_values)
-        elif value:
+            continue
+        # Tolerate unbalanced wrapping such as
+        #   - [ ] Verify with `verify: <command>`
+        # where the outer backtick is split by the regex (only the trailing
+        # backtick lands in `value`). Strip a single leading/trailing
+        # backtick before appending so the shell does not see unbalanced ``.
+        if value.startswith('`'):
+            value = value[1:]
+        if value.endswith('`'):
+            value = value[:-1]
+        value = value.strip()
+        if value:
             commands.append(value)
     return _ordered_unique_strings(commands)
 

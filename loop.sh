@@ -3814,6 +3814,10 @@ echo ""
 
 recover_incomplete_transaction
 
+# Per-run timestamp embedded in evidence dir names so concurrent or
+# successive runs do not collide on `loop-N`.
+EVIDENCE_RUN_TS="$(date '+%Y%m%d-%H%M%S')"
+
 # Print initial backlog progress
 run_backlog_manager progress "$BACKLOG" 2>/dev/null || true
 echo ""
@@ -3897,8 +3901,13 @@ for (( LOOP=1; LOOP<=MAX_LOOPS; LOOP++ )); do
 
   info "Current task: $NEXT_TASK_ID — $NEXT_TASK_NAME"
 
-  EVIDENCE_DIR="$EVIDENCE_ROOT/loop-$LOOP"
-  EVIDENCE_REL=".loop-agent/evidence/loop-$LOOP/"
+  # Evidence dir name: loop-N__<safe-task-id>__<run-timestamp>
+  # The loop-N prefix preserves sort/grep compatibility with prior runs;
+  # the suffixes make the dir self-identifying and prevent overwrite when
+  # later runs restart the loop counter at 1.
+  EVIDENCE_TASK_SAFE="$(printf '%s' "$NEXT_TASK_ID" | sed 's/[^A-Za-z0-9.]/-/g')"
+  EVIDENCE_DIR="$EVIDENCE_ROOT/loop-${LOOP}__${EVIDENCE_TASK_SAFE}__${EVIDENCE_RUN_TS}"
+  EVIDENCE_REL=".loop-agent/evidence/loop-${LOOP}__${EVIDENCE_TASK_SAFE}__${EVIDENCE_RUN_TS}/"
   mkdir -p "$EVIDENCE_DIR"
   apply_evidence_retention || warn "Evidence retention failed; continuing."
   TRANSACTION_SNAPSHOT_COMMIT=""

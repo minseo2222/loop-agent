@@ -88,7 +88,7 @@ capture_git_evidence() {
 evidence_referenced_dirs() {
   [[ -f "$BACKLOG" ]] || return 0
 
-  sed -nE 's|.*(\.loop-agent/evidence/loop-[0-9]+)(/[^[:space:]]*)?.*|\1|p' "$BACKLOG" 2>/dev/null \
+  sed -nE 's|.*(\.loop-agent/evidence/loop-[0-9]+(__[^/[:space:]]+)?)(/[^[:space:]]*)?.*|\1|p' "$BACKLOG" 2>/dev/null \
     | sort -u \
     | while IFS= read -r rel_dir; do
         [[ -n "$rel_dir" ]] || continue
@@ -109,7 +109,7 @@ archive_or_compact_evidence_dir() {
 
   [[ -d "$dir" ]] || return 0
   base="$(basename "$dir")"
-  [[ "$base" =~ ^loop-[0-9]+$ ]] || return 1
+  [[ "$base" =~ ^loop-[0-9]+(__.*)?$ ]] || return 1
 
   archive="$EVIDENCE_ROOT/${base}.tar.gz"
   tmp="$archive.tmp.$$"
@@ -141,32 +141,26 @@ apply_evidence_retention() {
   [[ -n "${EVIDENCE_ROOT:-}" ]] && [[ -d "$EVIDENCE_ROOT" ]] || return 0
   [[ -n "${EVIDENCE_DIR:-}" ]] && [[ -d "$EVIDENCE_DIR" ]] || return 0
 
-  local -a ids=()
   local -a dirs=()
   local -a keep_dirs=()
   local -a protected_dirs=()
-  local id dir current_dir start i
+  local dir base current_dir i
 
-  while IFS=$'\t' read -r id dir; do
-    [[ -n "$id" && -n "$dir" ]] || continue
-    ids+=("$id")
+  # Collect candidate evidence dirs sorted newest-first by mtime so multiple
+  # runs that each restart the loop counter at 1 don't trample one another:
+  # the new format is `loop-N__<task>__<run-ts>`, but legacy bare `loop-N`
+  # dirs are still recognized for back-compat.
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    base="$(basename "$dir")"
+    [[ "$base" =~ ^loop-[0-9]+(__.*)?$ ]] || continue
     dirs+=("$dir")
-  done < <(
-    find "$EVIDENCE_ROOT" -maxdepth 1 -type d -name 'loop-*' 2>/dev/null \
-      | while IFS= read -r dir; do
-          base="$(basename "$dir")"
-          if [[ "$base" =~ ^loop-([0-9]+)$ ]]; then
-            printf '%s\t%s\n' "${BASH_REMATCH[1]}" "$dir"
-          fi
-        done \
-      | sort -n -k1,1
-  )
+  done < <(ls -1td -- "$EVIDENCE_ROOT"/loop-*/ 2>/dev/null | sed 's|/$||')
 
   [[ ${#dirs[@]} -gt 0 ]] || return 0
 
-  start=$((${#dirs[@]} - LOOP_EVIDENCE_KEEP_RUNS))
-  [[ "$start" -lt 0 ]] && start=0
-  for ((i=start; i<${#dirs[@]}; i++)); do
+  # Newest N stay (front of mtime-sorted list)
+  for ((i=0; i<${#dirs[@]} && i<LOOP_EVIDENCE_KEEP_RUNS; i++)); do
     keep_dirs+=("${dirs[$i]}")
   done
 

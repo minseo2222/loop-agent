@@ -22,7 +22,7 @@ cd LoopDex && chmod +x loop.sh
 ./loop.sh run  --project /path/to/myproject     # asks for iterations interactively
 ```
 
-The first `init` or `run` opens a multiple-choice wizard for **CLI**, **model ID**, and **required branch prefix**, and saves the answers to `.loop-agent/config.env`. From the second run onward you just type `./loop.sh run --project <dir>` and it asks only for iteration count. Edit or delete `config.env` to change settings.
+The first `init` or `run` opens a multiple-choice wizard with four questions: **CLI**, **model ID**, **required branch prefix**, and **backlog source** (let Setup Agent generate it from your docs, or skip and use a backlog you wrote yourself). Answers are saved to `.loop-agent/config.env`. From the second run onward you just type `./loop.sh run --project <dir>` and it asks only for iteration count. Edit or delete `config.env` to change settings.
 
 Precedence: **CLI flag** > **exported env var** > **config.env** > **built-in default**.
 
@@ -39,7 +39,7 @@ This runs **before** the initial `git add -A`, so pre-existing `__pycache__/`, `
 
 1. **Install + log in** to your CLI of choice (`codex login` or `gemini`).
 2. **Make a project folder** with your planning docs (`SPEC.md`, `REQUIREMENTS.md`, `docs/*.md` — names don't matter).
-3. **`./loop.sh init --project <dir>`** — runs the setup wizard, bootstraps `.gitignore`, then has the Setup Agent generate `backlog.md` and the Setup Critic review it. You approve with `y`.
+3. **`./loop.sh init --project <dir>`** — runs the setup wizard, bootstraps `.gitignore`. If you picked "Generate from planning docs", the Setup Agent generates `backlog.md` and the Setup Critic reviews it (you approve with `y`). If you picked "I'll provide it myself", place your backlog at `<dir>/.loop-agent/backlog.md` first; init lints it and skips Setup Agent.
 4. **(Recommended) move to a dedicated branch** in the project:  `cd <dir> && git checkout -b loop/work`. If you picked `loop/` as the required prefix in the wizard, this is required before `run`.
 5. **`./loop.sh run --project <dir>`** — type the iteration count when prompted (or pass `-i N`). The loop starts.
 6. **(Optional) `./loop.sh doctor --project <dir>`** before step 5 to pre-flight check git / Python / CLI / model / branch / backlog lint.
